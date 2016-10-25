@@ -62,12 +62,12 @@ class TestMMan(TestBase):
                 assert man.max_mapped_memory_size() > 0
 
                 # collection doesn't raise in 'any' mode
-                self.assertEqual(man._collect_lru_region(0), 0)
+                self.assertEqual(man._purge_lru_regions(0), 0)
                 # doesn't raise if we are within the limit
-                self.assertEqual(man._collect_lru_region(10), 0)
+                self.assertEqual(man._purge_lru_regions(10), 0)
 
                 # doesn't fail if we over-allocate
-                self.assertEqual(man._collect_lru_region(sys.maxsize), 0)
+                self.assertEqual(man._purge_lru_regions(sys.maxsize), 0)
 
                 # use a region, verify most basic functionality
                 with FileCreator(self.k_window_test_size, "manager_test") as fc:
