@@ -21,29 +21,25 @@ class TestMMan(TestBase):
     def test_cursor(self):
         with FileCreator(self.k_window_test_size, "cursor_test") as fc:
             with SlidingWindowMapManager() as man:
-                ci = WindowCursor(man)  # invalid cursor
-                assert not ci.is_valid()
-                assert not ci.is_associated()
-                self.assertEqual(ci.size(), 0)       # this is cached, so we can query it in invalid state
+                with WindowCursor(man) as ci: # invalid cursor
+                    assert not ci.is_valid()
+                    assert not ci.is_associated()
+                    self.assertEqual(ci.size(), 0)  # this is cached, so we can query it in invalid state
 
-                cv = man.make_cursor(fc.path)
-                assert not cv.is_valid()    # no region mapped yet
-                assert cv.is_associated()  # but it know where to map it from
-                self.assertEqual(cv.file_size(), fc.size)
-                self.assertEqual(cv.path(), fc.path)
+                    with man.make_cursor(fc.path) as cv:
+                        assert not cv.is_valid()    # no region mapped yet
+                        assert cv.is_associated()  # but it know where to map it from
+                        self.assertEqual(cv.file_size(), fc.size)
+                        self.assertEqual(cv.path(), fc.path)
 
-            # copy module
-            cio = copy(cv)
-            assert not cio.is_valid() and cio.is_associated()
+                        # copy module
+                        cio = copy(cv)
+                        assert not cio.is_valid() and cio.is_associated()
 
-            # assign method
-            assert not ci.is_associated()
-            ci.assign(cv)
-            assert not ci.is_valid() and ci.is_associated()
-
-            # unuse non-existing region is fine
-            cv.unuse_region()
-            cv.unuse_region()
+                    # assign method
+                    assert not ci.is_associated()
+                    ci.assign(cv)
+                    assert not ci.is_valid() and ci.is_associated()
 
             # destruction is fine (even multiple times)
             cv._destroy()
@@ -66,9 +62,9 @@ class TestMMan(TestBase):
                 assert man.max_mapped_memory_size() > 0
 
                 # collection doesn't raise in 'any' mode
-                man._collect_lru_region(0)
+                self.assertEqual(man._collect_lru_region(0), 0)
                 # doesn't raise if we are within the limit
-                man._collect_lru_region(10)
+                self.assertEqual(man._collect_lru_region(10), 0)
 
                 # doesn't fail if we over-allocate
                 self.assertEqual(man._collect_lru_region(sys.maxsize), 0)
@@ -78,20 +74,18 @@ class TestMMan(TestBase):
                     fd = os.open(fc.path, os.O_RDONLY)
                     try:
                         for item in (fc.path, fd):
-                            c = man.make_cursor(item)
-                            assert c.path_or_fd() is item
-                            assert c.use_region(10, 10).is_valid()
-                            self.assertEqual(c.ofs_begin(), 10)
-                            self.assertEqual(c.size(), 10)
-                            with open(fc.path, 'rb') as fp:
-                                self.assertEqual(c.buffer()[:], fp.read(20)[10:])
+                            with man.make_cursor(item) as c:
+                                assert c.path_or_fd() is item
+                                assert c.use_region(10, 10).is_valid()
+                                self.assertEqual(c.ofs_begin(), 10)
+                                self.assertEqual(c.size(), 10)
+                                with open(fc.path, 'rb') as fp:
+                                    self.assertEqual(c.buffer()[:], fp.read(20)[10:])
 
-                        if isinstance(item, int):
-                            self.assertRaises(ValueError, c.path)
-                        else:
-                            self.assertRaises(ValueError, c.fd)
-                        # END handle value error
-                    # END for each input
+                                if isinstance(item, int):
+                                    self.assertRaises(ValueError, c.path)
+                                else:
+                                    self.assertRaises(ValueError, c.fd)
                     finally:
                         os.close(fd)
         # END for each manager type

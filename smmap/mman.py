@@ -30,20 +30,24 @@ class WindowCursor(object):
     Cursors should not be created manually, but are instead returned by the SlidingWindowMapManager
 
     .. Tip::
-        This is a re-entrant, but not thread-safe context-manager, to be used within a ``with ...:`` block,
-        to ensure any left-overs cursors are cleaned up.  If not entered, :meth:`use_region()``
-        will scream.
+        This is a NON re-entrant, not thread-safe, optional context-manager,
+        to be used within a ``with ...:`` block, ensuring any left-overs regions
+        are cleaned up.
+
+    .. Warning::
+        If not relying mmap-manager is not entered, :meth:`use_region()`` will scream.
 
     .. Note::
         The current implementation is suited for static and sliding window managers,
         but it also means that it must be suited for the somewhat quite different sliding manager.
         It could be improved, but I see no real need to do so."""
     __slots__ = (
-        '_manager',  # the manger keeping all file regions
-        '_rlist',   # a regions list with regions for our file
-        '_region',  # our current class:`MapRegion` or None
-        '_ofs',     # relative offset from the actually mapped area to our start area
-        '_size'     # maximum size we should provide
+        '_manager',     # the manger keeping all file regions
+        '_rlist',       # a regions list with regions for our file
+        '_region',      # our current class:`MapRegion` or None
+        '_ofs',         # relative offset from the actually mapped area to our start area
+        '_size',        # maximum size we should provide
+        '_entered',     # boolean accounting context-entry/exit
     )
 
     def __init__(self, manager=None, regions=None):
@@ -52,12 +56,22 @@ class WindowCursor(object):
         self._region = None
         self._ofs = 0
         self._size = 0
+        self._entered = False
 
     def __enter__(self):
+        assert not self._entered
+        self._entered = True
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
+        assert self._entered
         self._destroy()
+        self._entered = False
+
+    def __del__(self):
+        if self.is_valid():
+            log.warning("Alive %s: valid,=%s, associated=%s" %
+                        (self, self.is_valid(), self.is_associated()))
 
     def _destroy(self):
         """Destruction code to decrement counters"""
@@ -118,8 +132,13 @@ class WindowCursor(object):
         :return: this instance - it should be queried for whether it points to a valid memory region.
             This is not the case if the mapping failed because we reached the end of the file
 
-        **Note:**: The size actually mapped may be smaller than the given size. If that is the case,
-        either the file has reached its end, or the map was created between two existing regions"""
+        .. Warning::
+            The relying mmap-manager must have been "entered" before using this method.
+
+        .. Note::
+            The size actually mapped may be smaller than the given size. If that is the case,
+            either the file has reached its end, or the map was created between two existing regions
+        """
         self._manager._check_if_entered()
 
         need_region = True

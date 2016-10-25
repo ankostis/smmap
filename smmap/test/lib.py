@@ -1,7 +1,9 @@
 """Provide base classes for the test system"""
-from unittest import TestCase
+import gc
 import os
 import tempfile
+from unittest import TestCase
+
 
 __all__ = ['TestBase', 'FileCreator']
 
@@ -64,6 +66,10 @@ class TestBase(TestCase):
     def setUpAll(cls):
         # nothing for now
         pass
+
+    @classmethod
+    def tearDownClass(cls):
+        gc.collect()
 
     # END overrides
 
