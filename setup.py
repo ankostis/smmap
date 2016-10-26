@@ -52,6 +52,6 @@ setup(
         "Programming Language :: Python :: 3.4",
     ],
     long_description=long_description,
-    tests_require=('nose', 'nosexcover'),
+    tests_require=('nose', 'nosexcover', 'ddt'),
     test_suite='nose.collector'
 )
