@@ -94,34 +94,7 @@ class WindowCursor(object):
             # END exception handling
         # END handle regions
 
-    def _copy_from(self, rhs):
-        """Copy all data from rhs into this instance, handles usage count"""
-        self._manager = rhs._manager
-        self._rlist = type(rhs._rlist)(rhs._rlist)
-        self._region = rhs._region
-        self._ofs = rhs._ofs
-        self._size = rhs._size
-
-        for region in self._rlist:
-            region.increment_client_count()
-
-        if self._region is not None:
-            self._region.increment_client_count()
-        # END handle regions
-
-    def __copy__(self):
-        """copy module interface"""
-        cpy = type(self)()
-        cpy._copy_from(self)
-        return cpy
-
     #{ Interface
-    def assign(self, rhs):
-        """Assign rhs to this instance. This is required in order to get a real copy.
-        Alternativly, you can copy an existing instance using the copy module"""
-        self._destroy()
-        self._copy_from(rhs)
-
     def use_region(self, offset=0, size=0, flags=0):
         """Assure we point to a window which allows access to the given offset into the file
 
@@ -428,6 +401,7 @@ class StaticWindowMapManager(object):
             rlist.remove(region)
             region.increment_client_count(-1)
             self._handle_count -= 1
+            assert self._handle_count >= 0, self._handle_count
 
         return num_found
 
