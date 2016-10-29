@@ -7,13 +7,14 @@ from smmap.mman import (
     SlidingWindowMapManager,
     StaticWindowMapManager
 )
-from smmap.util import align_to_mmap
+from smmap.util import align_to_mmap, PY3
 
 from random import randint
 from time import time
 import os
 import sys
 from copy import copy
+from unittest.case import skipIf
 
 
 class TestMMan(TestBase):
@@ -94,6 +95,17 @@ class TestMMan(TestBase):
                     finally:
                         os.close(fd)
         # END for each manasger type
+
+    @skipIf(not PY3, "missing `assertRaisesRegex()` ")
+    def test_memory_manager_close_with_active_regions(self):
+        with FileCreator(self.k_window_test_size, "manager_test") as fc:
+            with SlidingWindowMapManager() as mman:
+                with mman.make_cursor(fc.path).use_region():
+                    exmsg = 'closed with 1 active-regions, held by 1 clients.'
+                    with self.assertRaisesRegex(ValueError, exmsg):
+                        mman.close()
+                ## Exiting tests closing cursor with closed regions.
+            ## Exiting tests double closing mman.
 
     def test_memman_operation(self):
         # test more access, force it to actually unmap regions

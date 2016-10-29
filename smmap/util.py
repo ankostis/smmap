@@ -238,9 +238,15 @@ class MapRegion(object):
             return False
         # end handle release
 
-    def release(self):
+    def release(self, skip_client_count_check=False):
         """Release all resources this instance might hold. Must only be called if there usage_count() is zero"""
         self._mf.close()
+
+        ## Only `mman.close()` invokes this method directly, regardless of client-counts.
+        #  The rest, must be reported (mman does so, collectively).
+        #
+        if not skip_client_count_check and self._uc > 1:
+            log.warning("Released region %s with '%s' active clients!", self, self._uc)
 
     #} END interface
 

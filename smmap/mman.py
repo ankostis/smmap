@@ -416,9 +416,20 @@ class StaticWindowMapManager(object):
             Not to fail on *Windows*, all files referencing mmaps must have been closed.
             If used as a context manager, any errors are suppressed.
         """
-        left_regions = self.collect()
-        if left_regions:
-            log.debug('Mem-man %s collected %s regions on closing.', self, left_regions)
+        n_active_regions = n_clients = 0
+        regions = (r for rlist in self._fdict.values() for r in rlist)
+        for region in regions:
+            cc = region.client_count()
+            if cc > 1:
+                n_active_regions += 1
+                n_clients += cc - 1  # discount our reference
+            region.release(skip_client_count_check=True)
+        self._fdict = None  # make this instance unsuable
+        if n_active_regions:
+            raise ValueError('Mem-man %s closed with %s active-regions, held by %s clients.' %
+                             (self, n_active_regions, n_clients))
+
+        self._fdict = None
 
     def make_cursor(self, path_or_fd):
         """
