@@ -1,54 +1,60 @@
 from __future__ import print_function
 
-from .lib import TestBase, FileCreator
+import os
+from random import randint
+import sys
+from time import time
+from unittest.case import skipIf
 
 from smmap.mman import (
-    WindowCursor,
     SlidingWindowMapManager,
-    StaticWindowMapManager
-)
-from smmap.util import align_to_mmap, PY3
+    StaticWindowMapManager, _MapWindow)
+from smmap.mman import align_to_mmap
+from smmap.util import PY3
 
-from random import randint
-from time import time
-import os
-import sys
-from copy import copy
-from unittest.case import skipIf
+from .lib import TestBase, FileCreator
 
 
 class TestMMan(TestBase):
 
-    def test_cursor(self):
-        with FileCreator(self.k_window_test_size, "cursor_test") as fc:
-            man = SlidingWindowMapManager()
-            ci = WindowCursor(man)  # invalid cursor
-            assert not ci.is_valid()
-            assert not ci.is_associated()
-            assert ci.size() == 0       # this is cached, so we can query it in invalid state
+    def test_window(self):
+        wl = _MapWindow(0, 1)        # left
+        wc = _MapWindow(1, 1)        # center
+        wc2 = _MapWindow(10, 5)      # another center
+        wr = _MapWindow(8000, 50)    # right
 
-            cv = man.make_cursor(fc.path)
-            assert not cv.is_valid()    # no region mapped yet
-            assert cv.is_associated()  # but it know where to map it from
-            assert cv.file_size() == fc.size
-            assert cv.path() == fc.path
+        assert wl.ofs_end() == 1
+        assert wc.ofs_end() == 2
+        assert wr.ofs_end() == 8050
 
-        # copy module
-        cio = copy(cv)
-        assert not cio.is_valid() and cio.is_associated()
+        # extension does nothing if already in place
+        maxsize = 100
+        wc.extend_left_to(wl, maxsize)
+        assert wc.ofs == 1 and wc.size == 1
+        wl.extend_right_to(wc, maxsize)
+        wl.extend_right_to(wc, maxsize)
+        assert wl.ofs == 0 and wl.size == 1
 
-        # assign method
-        assert not ci.is_associated()
-        ci.assign(cv)
-        assert not ci.is_valid() and ci.is_associated()
+        # respects maxsize
+        wc.extend_right_to(wr, maxsize)
+        assert wc.ofs == 1 and wc.size == maxsize
+        wc.extend_right_to(wr, maxsize)
+        assert wc.ofs == 1 and wc.size == maxsize
 
-        # unuse non-existing region is fine
-        cv.unuse_region()
-        cv.unuse_region()
+        # without maxsize
+        wc.extend_right_to(wr, sys.maxsize)
+        assert wc.ofs_end() == wr.ofs and wc.ofs == 1
 
-        # destruction is fine (even multiple times)
-        cv._destroy()
-        WindowCursor(man)._destroy()
+        # extend left
+        wr.extend_left_to(wc2, maxsize)
+        wr.extend_left_to(wc2, maxsize)
+        assert wr.size == maxsize
+
+        wr.extend_left_to(wc2, sys.maxsize)
+        assert wr.ofs == wc2.ofs_end()
+
+        wc.align()
+        assert wc.ofs == 0 and wc.size == align_to_mmap(wc.size, True)
 
     def test_memory_manager(self):
         slide_man = SlidingWindowMapManager()
@@ -221,8 +227,10 @@ class TestMMan(TestBase):
                         # END while we should do an access
                         elapsed = max(time() - st, 0.001)  # prevent zero divison errors on windows
                         mb = float(1000 * 1000)
-                        print("%s: Read %i mb of memory with %i random on cursor initialized with %s accesses in %fs (%f mb/s)\n"
-                              % (mtype, memory_read / mb, max_random_accesses, type(item), elapsed, (memory_read / mb) / elapsed),
+                        print("%s: Read %i mb of memory with %i random on cursor "
+                              "initialized with %s accesses in %fs (%f mb/s)\n"
+                              % (mtype, memory_read / mb, max_random_accesses, type(item),
+                                 elapsed, (memory_read / mb) / elapsed),
                               file=sys.stderr)
 
                         # an offset as large as the size doesn't work !

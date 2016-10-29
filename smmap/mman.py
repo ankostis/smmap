@@ -1,244 +1,92 @@
-"""Module containing a memory memory manager which provides a sliding window on a number of memory mapped files"""
+"""Module containing a memory memory manager which provides a sliding window on a number of memory mapped files."""
 from functools import reduce
 import logging
 import sys
 
-from smmap.util import suppress
-
-from .util import (
-    MapWindow,
+from .mwindow import (
+    WindowCursor,
     MapRegion,
     MapRegionList,
+)
+from .util import (
     is_64_bit,
-    string_types,
-    buffer,
+    suppress,
 )
 
 
-__all__ = ["StaticWindowMapManager", "SlidingWindowMapManager", "WindowCursor"]
+__all__ = ["StaticWindowMapManager", "SlidingWindowMapManager",
+           "ALLOCATIONGRANULARITY", "align_to_mmap", "_MapWindow"]
 
 log = logging.getLogger(__name__)
-#{ Utilities
-
-#}END utilities
 
 
-class WindowCursor(object):
+try:
+    from mmap import ALLOCATIONGRANULARITY
+except ImportError:
+    # in python pre 2.6, the ALLOCATIONGRANULARITY does not exist as it is mainly
+    # useful for aligning the offset. The offset argument doesn't exist there though
+    from mmap import PAGESIZE as ALLOCATIONGRANULARITY
+# END handle pythons missing quality assurance
 
+
+def align_to_mmap(num, round_up):
     """
-    Pointer into the mapped region of the memory manager, keeping the map
-    alive until it is destroyed and no other client uses it.
+    Align the given integer number to the closest page offset, which usually is 4096 bytes.
 
-    Cursors should not be created manually, but are instead returned by the SlidingWindowMapManager
+    :param round_up: if True, the next higher multiple of page size is used, otherwise
+        the lower page_size will be used (i.e. if True, 1 becomes 4096, otherwise it becomes 0)
+    :return: num rounded to closest page"""
+    res = (num // ALLOCATIONGRANULARITY) * ALLOCATIONGRANULARITY
+    if round_up and (res != num):
+        res += ALLOCATIONGRANULARITY
+    # END handle size
+    return res
 
-    **Note:**: The current implementation is suited for static and sliding window managers, but it also means
-    that it must be suited for the somewhat quite different sliding manager. It could be improved, but
-    I see no real need to do so."""
+
+class _MapWindow(object):
+
+    """Utility type which is used to snap windows towards each other, and to adjust their size"""
     __slots__ = (
-        '_manager',  # the manger keeping all file regions
-        '_rlist',   # a regions list with regions for our file
-        '_region',  # our current class:`MapRegion` or None
-        '_ofs',     # relative offset from the actually mapped area to our start area
-        '_size'     # maximum size we should provide
+        'ofs',      # offset into the file in bytes
+        'size'              # size of the window in bytes
     )
 
-    def __init__(self, manager=None, regions=None):
-        self._manager = manager
-        self._rlist = regions
-        self._region = None
-        self._ofs = 0
-        self._size = 0
+    def __init__(self, offset, size):
+        self.ofs = offset
+        self.size = size
 
-    def __del__(self):
-        self._destroy()
+    def __repr__(self):
+        return "_MapWindow(%i, %i)" % (self.ofs, self.size)
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self._destroy()
-
-    def _destroy(self):
-        """Destruction code to decrement counters"""
-        self.unuse_region()
-
-        if self._rlist is not None:
-            # Actual client count, which doesn't include the reference kept by the manager, nor ours
-            # as we are about to be deleted
-            try:
-                if len(self._rlist) == 0:
-                    # Free all resources associated with the mapped file
-                    self._manager._fdict.pop(self._rlist.path_or_fd())
-                # END remove regions list from manager
-            except (TypeError, KeyError):
-                # sometimes, during shutdown, getrefcount is None. Its possible
-                # to re-import it, however, its probably better to just ignore
-                # this python problem (for now).
-                # The next step is to get rid of the error prone getrefcount alltogether.
-                pass
-            # END exception handling
-        # END handle regions
-
-    def _copy_from(self, rhs):
-        """Copy all data from rhs into this instance, handles usage count"""
-        self._manager = rhs._manager
-        self._rlist = type(rhs._rlist)(rhs._rlist)
-        self._region = rhs._region
-        self._ofs = rhs._ofs
-        self._size = rhs._size
-
-        for region in self._rlist:
-            region.increment_client_count()
-
-        if self._region is not None:
-            self._region.increment_client_count()
-        # END handle regions
-
-    def __copy__(self):
-        """copy module interface"""
-        cpy = type(self)()
-        cpy._copy_from(self)
-        return cpy
-
-    #{ Interface
-    def assign(self, rhs):
-        """Assign rhs to this instance. This is required in order to get a real copy.
-        Alternativly, you can copy an existing instance using the copy module"""
-        self._destroy()
-        self._copy_from(rhs)
-
-    def use_region(self, offset=0, size=0, flags=0):
-        """Assure we point to a window which allows access to the given offset into the file
-
-        :param offset: absolute offset in bytes into the file
-        :param size: amount of bytes to map. If 0, all available bytes will be mapped
-        :param flags: additional flags to be given to os.open in case a file handle is initially opened
-            for mapping. Has no effect if a region can actually be reused.
-        :return: this instance - it should be queried for whether it points to a valid memory region.
-            This is not the case if the mapping failed because we reached the end of the file
-
-        **Note:**: The size actually mapped may be smaller than the given size. If that is the case,
-        either the file has reached its end, or the map was created between two existing regions"""
-        need_region = True
-        man = self._manager
-        fsize = self._rlist.file_size()
-        size = min(size or fsize, man.window_size() or fsize)   # clamp size to window size
-
-        if self._region is not None:
-            if self._region.includes_ofs(offset):
-                need_region = False
-            else:
-                self.unuse_region()
-            # END handle existing region
-        # END check existing region
-
-        # offset too large ?
-        if offset >= fsize:
-            return self
-        # END handle offset
-
-        if need_region:
-            self._region = man._obtain_region(self._rlist, offset, size, flags, False)
-            self._region.increment_client_count()
-        # END need region handling
-
-        self._ofs = offset - self._region._b
-        self._size = min(size, self._region.ofs_end() - offset)
-
-        return self
-
-    def unuse_region(self):
-        """Unuse the current region. Does nothing if we have no current region
-
-        **Note:** the cursor unuses the region automatically upon destruction. It is recommended
-        to un-use the region once you are done reading from it in persistent cursors as it
-        helps to free up resource more quickly"""
-        if self._region is not None:
-            self._region.increment_client_count(-1)
-        self._region = None
-        # note: should reset ofs and size, but we spare that for performance. Its not
-        # allowed to query information if we are not valid !
-
-    def buffer(self):
-        """Return a buffer object which allows access to our memory region from our offset
-        to the window size. Please note that it might be smaller than you requested when calling use_region()
-
-        **Note:** You can only obtain a buffer if this instance is_valid() !
-
-        **Note:** buffers should not be cached passed the duration of your access as it will
-        prevent resources from being freed even though they might not be accounted for anymore !"""
-        return buffer(self._region.buffer(), self._ofs, self._size)
-
-    def map(self):
-        """
-        :return: the underlying raw memory map. Please not that the offset and size is likely to be different
-            to what you set as offset and size. Use it only if you are sure about the region it maps, which is the whole
-            file in case of StaticWindowMapManager"""
-        return self._region.map()
-
-    def is_valid(self):
-        """:return: True if we have a valid and usable region"""
-        return self._region is not None
-
-    def is_associated(self):
-        """:return: True if we are associated with a specific file already"""
-        return self._rlist is not None
-
-    def ofs_begin(self):
-        """:return: offset to the first byte pointed to by our cursor
-
-        **Note:** only if is_valid() is True"""
-        return self._region._b + self._ofs
+    @classmethod
+    def from_region(cls, region):
+        """:return: new window from a region"""
+        return cls(region._b, region.size())
 
     def ofs_end(self):
-        """:return: offset to one past the last available byte"""
-        # unroll method calls for performance !
-        return self._region._b + self._ofs + self._size
+        return self.ofs + self.size
 
-    def size(self):
-        """:return: amount of bytes we point to"""
-        return self._size
+    def align(self):
+        """Assures the previous window area is contained in the new one"""
+        nofs = align_to_mmap(self.ofs, 0)
+        self.size += self.ofs - nofs    # keep size constant
+        self.ofs = nofs
+        self.size = align_to_mmap(self.size, 1)
 
-    def region(self):
-        """:return: our mapped region, or None if nothing is mapped yet
-        :raise AssertionError: if we have no current region. This is only useful for debugging"""
-        return self._region
+    def extend_left_to(self, window, max_size):
+        """Adjust the offset to start where the given window on our left ends if possible,
+        but don't make yourself larger than max_size.
+        The resize will assure that the new window still contains the old window area"""
+        rofs = self.ofs - window.ofs_end()
+        nsize = rofs + self.size
+        rofs -= nsize - min(nsize, max_size)
+        self.ofs = self.ofs - rofs
+        self.size += rofs
 
-    def includes_ofs(self, ofs):
-        """:return: True if the given absolute offset is contained in the cursors
-            current region
-
-        **Note:** cursor must be valid for this to work"""
-        # unroll methods
-        return (self._region._b + self._ofs) <= ofs < (self._region._b + self._ofs + self._size)
-
-    def file_size(self):
-        """:return: size of the underlying file"""
-        return self._rlist.file_size()
-
-    def path_or_fd(self):
-        """:return: path or file descriptor of the underlying mapped file"""
-        return self._rlist.path_or_fd()
-
-    def path(self):
-        """:return: path of the underlying mapped file
-        :raise ValueError: if attached path is not a path"""
-        if isinstance(self._rlist.path_or_fd(), int):
-            raise ValueError("Path queried although mapping was applied to a file descriptor")
-        # END handle type
-        return self._rlist.path_or_fd()
-
-    def fd(self):
-        """:return: file descriptor used to create the underlying mapping.
-
-        **Note:** it is not required to be valid anymore
-        :raise ValueError: if the mapping was not created by a file descriptor"""
-        if isinstance(self._rlist.path_or_fd(), string_types()):
-            raise ValueError("File descriptor queried although mapping was generated from path")
-        # END handle type
-        return self._rlist.path_or_fd()
-
-    #} END interface
+    def extend_right_to(self, window, max_size):
+        """Adjust the size to make our window end where the right window begins, but don't
+        get larger than max_size"""
+        self.size = min(self.size + (window.ofs - self.ofs_end()), max_size)
 
 
 class StaticWindowMapManager(object):
@@ -270,7 +118,7 @@ class StaticWindowMapManager(object):
 
     #{ Configuration
     MapRegionListCls = MapRegionList
-    MapWindowCls = MapWindow
+    _MapWindowCls = _MapWindow
     MapRegionCls = MapRegion
     WindowCursorCls = WindowCursor
     #} END configuration
@@ -559,9 +407,9 @@ class SlidingWindowMapManager(StaticWindowMapManager):
 
         if r is None:
             window_size = self._window_size
-            left = self.MapWindowCls(0, 0)
-            mid = self.MapWindowCls(offset, size)
-            right = self.MapWindowCls(a.file_size(), 0)
+            left = self._MapWindowCls(0, 0)
+            mid = self._MapWindowCls(offset, size)
+            right = self._MapWindowCls(a.file_size(), 0)
 
             # we want to honor the max memory size, and assure we have anough
             # memory available
@@ -592,13 +440,13 @@ class SlidingWindowMapManager(StaticWindowMapManager):
             # possible mapping
             if insert_pos == 0:
                 if len_regions:
-                    right = self.MapWindowCls.from_region(a[insert_pos])
+                    right = self._MapWindowCls.from_region(a[insert_pos])
                 # END adjust right side
             else:
                 if insert_pos != len_regions:
-                    right = self.MapWindowCls.from_region(a[insert_pos])
+                    right = self._MapWindowCls.from_region(a[insert_pos])
                 # END adjust right window
-                left = self.MapWindowCls.from_region(a[insert_pos - 1])
+                left = self._MapWindowCls.from_region(a[insert_pos - 1])
             # END adjust surrounding windows
 
             mid.extend_left_to(left, window_size)
