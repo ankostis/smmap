@@ -61,7 +61,7 @@ class _MapWindow(object):
     @classmethod
     def from_region(cls, region):
         """:return: new window from a region"""
-        return cls(region._b, region.size())
+        return cls(region._ofs, region.size())
 
     def ofs_end(self):
         return self.ofs + self.size
@@ -393,7 +393,7 @@ class SlidingWindowMapManager(StaticWindowMapManager):
         hi = len(a)
         while lo < hi:
             mid = (lo + hi) // 2
-            ofs = a[mid]._b
+            ofs = a[mid]._ofs
             if ofs <= offset:
                 if a[mid].includes_ofs(offset):
                     r = a[mid]
@@ -422,14 +422,14 @@ class SlidingWindowMapManager(StaticWindowMapManager):
             insert_pos = 0
             len_regions = len(a)
             if len_regions == 1:
-                if a[0]._b <= offset:
+                if a[0]._ofs <= offset:
                     insert_pos = 1
                 # END maintain sort
             else:
                 # find insert position
                 insert_pos = len_regions
                 for i, region in enumerate(a):
-                    if region._b > offset:
+                    if region._ofs > offset:
                         insert_pos = i
                         break
                     # END if insert position is correct

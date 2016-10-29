@@ -125,7 +125,7 @@ class WindowCursor(object):
             self._region.increment_client_count()
         # END need region handling
 
-        self._ofs = offset - self._region._b
+        self._ofs = offset - self._region._ofs
         self._size = min(size, self._region.ofs_end() - offset)
 
         return self
@@ -171,12 +171,12 @@ class WindowCursor(object):
         """:return: offset to the first byte pointed to by our cursor
 
         **Note:** only if is_valid() is True"""
-        return self._region._b + self._ofs
+        return self._region._ofs + self._ofs
 
     def ofs_end(self):
         """:return: offset to one past the last available byte"""
         # unroll method calls for performance !
-        return self._region._b + self._ofs + self._size
+        return self._region._ofs + self._ofs + self._size
 
     def size(self):
         """:return: amount of bytes we point to"""
@@ -193,7 +193,7 @@ class WindowCursor(object):
 
         **Note:** cursor must be valid for this to work"""
         # unroll methods
-        return (self._region._b + self._ofs) <= ofs < (self._region._b + self._ofs + self._size)
+        return (self._region._ofs + self._ofs) <= ofs < (self._region._ofs + self._ofs + self._size)
 
     def file_size(self):
         """:return: size of the underlying file"""
@@ -228,7 +228,7 @@ class MapRegion(object):
 
     **Note:** deallocates used region automatically on destruction"""
     __slots__ = [
-        '_b',   # beginning of mapping
+        '_ofs',   # beginning of mapping
         '_size',  # cached size of our memory map
         '_mf',  # mapped memory chunk (as returned by mmap)
         '_uc',  # total amount of usages
@@ -243,7 +243,7 @@ class MapRegion(object):
             allocated the the size automatically adjusted
         :param flags: additional flags to be given when opening the file.
         :raise Exception: if no memory can be allocated"""
-        self._b = ofs
+        self._ofs = ofs
         self._size = 0
         self._uc = 0
 
@@ -269,7 +269,7 @@ class MapRegion(object):
         self.increment_client_count()
 
     def __repr__(self):
-        return "MapRegion<%i, %i>" % (self._b, self.size())
+        return "MapRegion<%i, %i>" % (self._ofs, self.size())
 
     #{ Interface
 
@@ -283,7 +283,7 @@ class MapRegion(object):
 
     def ofs_begin(self):
         """:return: absolute byte offset to the first byte of the mapping"""
-        return self._b
+        return self._ofs
 
     def size(self):
         """:return: total size of the mapped region in bytes"""
@@ -291,11 +291,11 @@ class MapRegion(object):
 
     def ofs_end(self):
         """:return: Absolute offset to one byte beyond the mapping into the file"""
-        return self._b + self._size
+        return self._ofs + self._size
 
     def includes_ofs(self, ofs):
         """:return: True if the given offset can be read in our mapped region"""
-        return self._b <= ofs < self._b + self._size
+        return self._ofs <= ofs < self._ofs + self._size
 
     def client_count(self):
         """:return: number of clients currently using this region"""
@@ -308,7 +308,7 @@ class MapRegion(object):
         self._uc += ofs
         assert self._uc > -1, "Increments must match decrements, usage counter negative: %i" % self._uc
 
-        if self.client_count() == 0:
+        if self._uc == 0:
             self.release()
             return True
         else:
