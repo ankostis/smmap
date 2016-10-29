@@ -447,12 +447,12 @@ class StaticWindowMapManager(object):
 
         **Note:** Using file descriptors directly is faster once new windows are mapped as it
         prevents the file to be opened again just for the purpose of mapping it."""
-        regions = self._fdict.get(path_or_fd)
-        if regions is None:
-            regions = self.MapRegionListCls(path_or_fd)
-            self._fdict[path_or_fd] = regions
+        rlist = self._fdict.get(path_or_fd)
+        if rlist is None:
+            rlist = self.MapRegionListCls(path_or_fd)
+            self._fdict[path_or_fd] = rlist
         # END obtain region for path
-        return self.WindowCursorCls(self, regions)
+        return self.WindowCursorCls(self, rlist)
 
     def collect(self):
         """Collect all available free-to-collect mapped regions
