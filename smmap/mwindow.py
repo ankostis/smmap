@@ -1,277 +1,249 @@
-"""Memory-managers provide static or sliding windows on memory mapped files."""
+"""
+Memory-managers provide static or sliding windows on memory mapped files.
+
+Cursors/Regiond Differences
+=============================
+- lifecycle: regions are long-lived managed by mman, cursors are only allowed as context-managers.
+- offsets: cursors are have exactly placement of offsets, regions are page aligned
+
+"""
 import logging
 from mmap import mmap, ACCESS_READ
 import os
-import sys
+
+from smmap.util import buffer, string_types
 
 
-__all__ = ["buffer",
-           "WindowCursor", "MapRegion", "MapRegionList",
-           ]
+__all__ = ["WindowCursor", "MapRegion"]
 
 log = logging.getLogger(__name__)
 
-try:
-    # Python 2
-    buffer = buffer  # @UndefinedVariable
-except NameError:
-    # Python 3 has no `buffer`; only `memoryview`
-    def buffer(obj, offset, size):
-        # Actually, for gitpython this is fastest ... but `memoryviews` LEAK!
-        #return memoryview(obj)[offset:offset + size]
-        return obj[offset:offset + size]
+
+class _WindowHandle(object):
+    """
+    Abstract non-re-entrant no-reusable context-manager for a mman-managed memory window into a file.
+
+    @property
+    def self.closed():
+        (abstract) return True if already closed
+
+    def release():
+        (abstract) must clean up any resources or fail on any irregularity
+
+    """
+
+    __slots__ = (
+        'mman',         # the manger keeping all file regions
+        'path_or_fd',   # the file we are acting upon
+        'ofs',          # the absolute offset from the actually mapped area to our start area
+        'size'          # maximum size we should provide
+    )
+
+    def __init__(self, mman, path_or_fd, ofs=0, size=0):
+        self.mman = mman
+        self.path_or_fd = path_or_fd
+        self.ofs = ofs
+        self.size = size
+
+    def __repr__(self):
+        return "%s(%s, %i, %i)" % (type(self).__name__, self.path_or_fd, self.ofs, self.size)
+
+    def __hash__(self):
+        return id(self)
+
+    def __len__(self):
+        return self.size
+
+    def __enter__(self):
+        return self
+
+    def __del__(self):
+        self.close()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        """"Will raises if it has been double-entered."""
+        self.release()
+
+    def close(self):
+        """Closes the current windows. Does nothing if already closed."""
+        if not self.closed:
+            self.release()
+
+    @property
+    def path(self):
+        """:return: path of the underlying mapped file
+
+        :raise AssertionError: if attached path is not a path"""
+        pathfd = self.path_or_fd
+        assert not isinstance(pathfd, int), (
+            "Path queried on %s although cursor created with a file descriptor(%s)!"
+            "\n  Use `fd` or `path_or_fd` properties instead." % (self, pathfd))
+
+        return pathfd
+
+    @property
+    def fd(self):
+        """:return: file descriptor used to create the underlying mapping.
+
+        :raise AssertionError: if the mapping was not created by a file descriptor"""
+        pathfd = self.path_or_fd
+        assert isinstance(pathfd, int), (
+            "File-descriptor queried on %s although cursor created with a path(%s)!"
+            "\n  Use `path` or `path_or_fd` properties instead." % (self, pathfd))
+
+    @property
+    def rlist(self):
+        """:return: our mapped region, or None if nothing is mapped yet
+        :raise AssertionError: if we have no current region"""
+        return self.mman.rlist_for_path_or_fd(self.path_or_fd)
+
+    @property
+    def ofs_end(self):
+        """:return: Absolute offset to one byte beyond the mapping into the file"""
+        return self.ofs + self.size
+
+    def includes_ofs(self, ofs):
+        """:return: True if the given offset can be read in our mapped region"""
+        return self.ofs <= ofs < self.ofs + self.size
 
 
-#:True if the system is 64 bit. Otherwise it can be assumed to be 32 bit
-is_64_bit = sys.maxsize > (1 << 32) - 1
-PY3 = sys.version_info[0] >= 3
-
-
-def string_types():
-    if PY3:
-        return str
-    else:
-        return basestring  # @UndefinedVariable
-
-
-class WindowCursor(object):
+class WindowCursor(_WindowHandle):
 
     """
     Pointer into the mapped region of the memory manager, keeping the map
     alive until it is destroyed and no other client uses it.
 
-    Cursors should not be created manually, but are instead returned by the SlidingWindowMapManager
+    .. Tip::
+        Cursors should not be created manually, but though returned by
+        :meth:`StaticWindowMapManager.make_cursor()` or :meth:`SlidingWindowMapManager.make_cursor()`.
 
-    **Note:**: The current implementation is suited for static and sliding window managers, but it also means
-    that it must be suited for the somewhat quite different sliding manager. It could be improved, but
-    I see no real need to do so."""
-    __slots__ = (
-        '_manager',  # the manger keeping all file regions
-        '_rlist',   # a regions list with regions for our file
-        '_region',  # our current class:`MapRegion` or None
-        '_ofs',     # relative offset from the actually mapped area to our start area
-        '_size'     # maximum size we should provide
-    )
+        It is recommended to close a cursor once you are done reading/writing,
+        to help its referred region to get collected sooner.
 
-    def __init__(self, manager=None, regions=None):
-        self._manager = manager
-        self._rlist = regions
-        self._region = None
-        self._ofs = 0
-        self._size = 0
+        Since it is a NON re-entrant, non thread-safe, optional context-manager,
+        it may be used within a ``with ...:`` block.
+    """
 
-    def __del__(self):
-        self._destroy()
+    @property
+    def closed(self):
+        return not self.mman.is_cursor_valid(self)
 
-    def __enter__(self):
-        return self
+    def make_cursor(self, offset=None, size=None, flags=None):
+        """:return: a new cursor for the new offset/size/flags.
 
-    def __exit__(self, exc_type, exc_value, traceback):
-        self._destroy()
+        For the params see :meth:`StaticWindowMapManager.make_cursor()`.
+        """
+        kwds = dict((k, v) for k, v in locals().items() if v is not None)
+        kwds.pop('self')
+        return self.mman.make_cursor(self.path_or_fd, **kwds)
 
-    def _destroy(self):
-        """Destruction code to decrement counters"""
-        self.unuse_region()
+    def next_cursor(self, offset=None, size=None, flags=0):
+        """
+        :param ofs:
+            If not specified, it becomes ``self.ofs + self.size``.
+        :param size:
+            If not specified, it is fetched from this instance.
+        :return:
+            a new cursor for the new offset/size/flags.
 
-        if self._rlist is not None:
-            # Actual client count, which doesn't include the reference kept by the manager, nor ours
-            # as we are about to be deleted
-            try:
-                if len(self._rlist) == 0:
-                    # Free all resources associated with the mapped file
-                    self._manager._fdict.pop(self._rlist.path_or_fd())
-                # END remove regions list from manager
-            except (TypeError, KeyError):
-                # sometimes, during shutdown, getrefcount is None. Its possible
-                # to re-import it, however, its probably better to just ignore
-                # this python problem (for now).
-                # The next step is to get rid of the error prone getrefcount alltogether.
-                pass
-            # END exception handling
-        # END handle regions
+        For the params see also :meth:`StaticWindowMapManager.make_cursor()`.
+        """
+        if offset is None:
+            offset = self.ofs + self.size
+        if size is None:
+            size = self.size
+        return self.mman.make_cursor(self.path_or_fd, offset, size, flags)
 
-    def use_region(self, offset=0, size=0, flags=0):
-        """Assure we point to a window which allows access to the given offset into the file
-
-        :param offset: absolute offset in bytes into the file
-        :param size: amount of bytes to map. If 0, all available bytes will be mapped
-        :param flags: additional flags to be given to os.open in case a file handle is initially opened
-            for mapping. Has no effect if a region can actually be reused.
-        :return: this instance - it should be queried for whether it points to a valid memory region.
-            This is not the case if the mapping failed because we reached the end of the file
-
-        **Note:**: The size actually mapped may be smaller than the given size. If that is the case,
-        either the file has reached its end, or the map was created between two existing regions"""
-        need_region = True
-        man = self._manager
-        fsize = self._rlist.file_size()
-        size = min(size or fsize, man.window_size() or fsize)   # clamp size to window size
-
-        if self._region is not None:
-            if self._region.includes_ofs(offset):
-                need_region = False
-            else:
-                self.unuse_region()
-            # END handle existing region
-        # END check existing region
-
-        # offset too large ?
-        if offset >= fsize:
-            return self
-        # END handle offset
-
-        if need_region:
-            self._region = man._obtain_region(self._rlist, offset, size, flags, False)
-            self._region.increment_client_count()
-        # END need region handling
-
-        self._ofs = offset - self._region._ofs
-        self._size = min(size, self._region.ofs_end() - offset)
-
-        return self
-
-    def unuse_region(self):
-        """Unuse the current region. Does nothing if we have no current region
-
-        **Note:** the cursor unuses the region automatically upon destruction. It is recommended
-        to un-use the region once you are done reading from it in persistent cursors as it
-        helps to free up resource more quickly"""
-        if self._region is not None:
-            self._region.increment_client_count(-1)
-        self._region = None
-        # note: should reset ofs and size, but we spare that for performance. Its not
-        # allowed to query information if we are not valid !
+    def release(self):
+        """Closes the current window. fails if already closed."""
+        self.mman._release_cursor(self)
 
     def buffer(self):
         """Return a buffer object which allows access to our memory region from our offset
-        to the window size. Please note that it might be smaller than you requested when calling use_region()
+        to the window size. Please note that it might be smaller than you requested when created
 
-        **Note:** You can only obtain a buffer if this instance is_valid() !
-
-        **Note:** buffers should not be cached passed the duration of your access as it will
-        prevent resources from being freed even though they might not be accounted for anymore !"""
-        return buffer(self._region.buffer(), self._ofs, self._size)
+        .. Note::
+            buffers should not be cached passed the duration of your access as it will
+            prevent resources from being freed even though they might not be accounted for anymore !"""
+        region = self.region
+        return buffer(region.buffer(), self.ofs - region.ofs, self.size)
 
     def map(self):
         """
         :return: the underlying raw memory map. Please not that the offset and size is likely to be different
             to what you set as offset and size. Use it only if you are sure about the region it maps, which is the whole
             file in case of StaticWindowMapManager"""
-        return self._region.map()
+        return self.region.map()
 
-    def is_valid(self):
-        """:return: True if we have a valid and usable region"""
-        return self._region is not None
-
-    def is_associated(self):
-        """:return: True if we are associated with a specific file already"""
-        return self._rlist is not None
-
-    def ofs_begin(self):
-        """:return: offset to the first byte pointed to by our cursor
-
-        **Note:** only if is_valid() is True"""
-        return self._region._ofs + self._ofs
-
-    def ofs_end(self):
-        """:return: offset to one past the last available byte"""
-        # unroll method calls for performance !
-        return self._region._ofs + self._ofs + self._size
-
-    def size(self):
-        """:return: amount of bytes we point to"""
-        return self._size
-
+    @property
     def region(self):
-        """:return: our mapped region, or None if nothing is mapped yet
-        :raise AssertionError: if we have no current region. This is only useful for debugging"""
-        return self._region
-
-    def includes_ofs(self, ofs):
-        """:return: True if the given absolute offset is contained in the cursors
-            current region
-
-        **Note:** cursor must be valid for this to work"""
-        # unroll methods
-        return (self._region._ofs + self._ofs) <= ofs < (self._region._ofs + self._ofs + self._size)
+        """:return: our mapped region, or None if cursor is closed """
+        return self.mman.region_for_cursor(self)
 
     def file_size(self):
         """:return: size of the underlying file"""
-        return self._rlist.file_size()
-
-    def path_or_fd(self):
-        """:return: path or file descriptor of the underlying mapped file"""
-        return self._rlist.path_or_fd()
-
-    def path(self):
-        """:return: path of the underlying mapped file
-        :raise ValueError: if attached path is not a path"""
-        if isinstance(self._rlist.path_or_fd(), int):
-            raise ValueError("Path queried although mapping was applied to a file descriptor")
-        # END handle type
-        return self._rlist.path_or_fd()
-
-    def fd(self):
-        """:return: file descriptor used to create the underlying mapping.
-
-        **Note:** it is not required to be valid anymore
-        :raise ValueError: if the mapping was not created by a file descriptor"""
-        if isinstance(self._rlist.path_or_fd(), string_types()):
-            raise ValueError("File descriptor queried although mapping was generated from path")
-        # END handle type
-        return self._rlist.path_or_fd()
+        return self.rlist.file_size()
 
 
-class MapRegion(object):
+class MapRegion(_WindowHandle):
 
     """Defines a mapped region of memory, aligned to pagesizes
-
-    **Note:** deallocates used region automatically on destruction"""
+    """
     __slots__ = [
-        '_ofs',   # beginning of mapping
-        '_size',  # cached size of our memory map
-        '_mf',  # mapped memory chunk (as returned by mmap)
-        '_uc',  # total amount of usages
+        '_mf',      # mapped memory chunk (as returned by mmap)
         '__weakref__'
     ]
 
-    def __init__(self, path_or_fd, ofs, size, flags=0):
+    def __init__(self, mman, path_or_fd, ofs=0, size=0, flags=0):
         """Initialize a region, allocate the memory map
-        :param path_or_fd: path to the file to map, or the opened file descriptor
-        :param ofs: **aligned** offset into the file to be mapped
-        :param size: if size is larger then the file on disk, the whole file will be
+        :param path_or_fd:
+            path to the file to map, or the opened file descriptor
+        :param ofs:
+            **aligned** offset into the file to be mapped
+        :param size:
+            if size is larger then the file on disk, the whole file will be
             allocated the the size automatically adjusted
-        :param flags: additional flags to be given when opening the file.
-        :raise Exception: if no memory can be allocated"""
-        self._ofs = ofs
-        self._size = 0
-        self._uc = 0
 
+            .. Note::
+                The actually size may be smaller than requested, either because
+                the file-size is smaller, or the map was created between two existing regions.
+
+        :param flags:
+            additional flags to be given when opening the file.
+        :raise Exception:
+            if no memory can be allocated
+
+        .. Warning::
+            In case of error (i.e. not enough memory) and an open fd was passed in,
+            the client is responsible to close it!
+        """
+        ## TODO: Move to `mman`.
         if isinstance(path_or_fd, int):
             fd = path_or_fd
         else:
             fd = os.open(path_or_fd, os.O_RDONLY | getattr(os, 'O_BINARY', 0) | flags)
-        # END handle fd
 
         try:
-            actual_size = min(os.fstat(fd).st_size - ofs, size)
-            self._mf = mmap(fd, actual_size, access=ACCESS_READ, offset=ofs)
-            # END handle memory mode
+            requested_size = min(os.fstat(fd).st_size - ofs, size)
+            self._mf = mmap(fd, requested_size, access=ACCESS_READ, offset=ofs)
 
-            self._size = len(self._mf)
-            # END handle buffer wrapping
+            actual_size = len(self._mf)
+            super(MapRegion, self).__init__(mman, path_or_fd, ofs, actual_size)
         finally:
+            ## Only close it if we opened it.
+            #
             if not isinstance(path_or_fd, int):
                 os.close(fd)
-            # END only close it if we opened it
-        # END close file handle
-        # We assume the first one to use us keeps us around
-        self.increment_client_count()
-
-    def __repr__(self):
-        return "MapRegion<%i, %i>" % (self._ofs, self.size())
 
     #{ Interface
+
+    @property
+    def closed(self):
+        return self._mf is None
+
+    def cursors(self):
+        """:return: a tuple of all cursors bound to the region"""
+        return self.mman.cursors_for_region(self)
 
     def buffer(self):
         """:return: a buffer containing the memory"""
@@ -281,81 +253,15 @@ class MapRegion(object):
         """:return: a memory map containing the memory"""
         return self._mf
 
-    def ofs_begin(self):
-        """:return: absolute byte offset to the first byte of the mapping"""
-        return self._ofs
+    def release(self):
+        """Release all resources this instance might hold.
 
-    def size(self):
-        """:return: total size of the mapped region in bytes"""
-        return self._size
-
-    def ofs_end(self):
-        """:return: Absolute offset to one byte beyond the mapping into the file"""
-        return self._ofs + self._size
-
-    def includes_ofs(self, ofs):
-        """:return: True if the given offset can be read in our mapped region"""
-        return self._ofs <= ofs < self._ofs + self._size
-
-    def client_count(self):
-        """:return: number of clients currently using this region"""
-        return self._uc
-
-    def increment_client_count(self, ofs=1):
-        """Adjust the usage count by the given positive or negative offset.
-        If usage count equals 0, we will auto-release our resources
-        :return: True if we released resources, False otherwise. In the latter case, we can still be used"""
-        self._uc += ofs
-        assert self._uc > -1, "Increments must match decrements, usage counter negative: %i" % self._uc
-
-        if self._uc == 0:
-            self.release()
-            return True
-        else:
-            return False
-        # end handle release
-
-    def release(self, skip_client_count_check=False):
-        """Release all resources this instance might hold. Must only be called if there usage_count() is zero"""
-        self._mf.close()
-
-        ## Only `mman.close()` invokes this method directly, regardless of client-counts.
-        #  The rest, must be reported (mman does so, collectively).
-        #
-        if not skip_client_count_check and self._uc > 1:
-            log.warning("Released region %s with '%s' active clients!", self, self._uc)
+        Invoked by *mman* when closing or purging unused regions to make space.
+        If invoked while still cursors are bound, they will fail later, when attempting
+        to access the underlying mmap.
+        """
+        self.mman._release_region(self)
 
     #} END interface
-
-
-class MapRegionList(list):
-
-    """List of MapRegion instances associating a path with a list of regions."""
-    __slots__ = (
-        '_path_or_fd',  # path or file descriptor which is mapped by all our regions
-        '_file_size'    # total size of the file we map
-    )
-
-    def __new__(cls, path):
-        return super(MapRegionList, cls).__new__(cls)
-
-    def __init__(self, path_or_fd):
-        self._path_or_fd = path_or_fd
-        self._file_size = None
-
-    def path_or_fd(self):
-        """:return: path or file descriptor we are attached to"""
-        return self._path_or_fd
-
-    def file_size(self):
-        """:return: size of file we manager"""
-        if self._file_size is None:
-            if isinstance(self._path_or_fd, string_types()):
-                self._file_size = os.stat(self._path_or_fd).st_size
-            else:
-                self._file_size = os.fstat(self._path_or_fd).st_size
-            # END handle path type
-        # END update file size
-        return self._file_size
 
 #} END utility classes

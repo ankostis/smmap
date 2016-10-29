@@ -1,5 +1,6 @@
 """Module with a simple buffer implementation using the memory manager"""
 import sys
+from smmap.mwindow import _WindowHandle
 
 __all__ = ["SlidingWindowMapBuffer"]
 
@@ -10,76 +11,75 @@ except NameError:
     bytes = str  # @ReservedAssignment
 
 
-class SlidingWindowMapBuffer(object):
+class SlidingWindowMapBuffer(_WindowHandle):
 
     """A buffer like object which allows direct byte-wise object and slicing into
-    memory of a mapped file. The mapping is controlled by the provided cursor.
+    memory of a mapped file. The mapping is controlled by the slicing
 
     The buffer is relative, that is if you map an offset, index 0 will map to the
-    first byte at the offset you used during initialization or begin_access
+    first byte at the offset you used during initialization.
 
     **Note:** Although this type effectively hides the fact that there are mapped windows
     underneath, it can unfortunately not be used in any non-pure python method which
     needs a buffer or string"""
     __slots__ = (
         '_c',           # our cursor
-        '_size',        # our supposed size
+        'flags',        # flags for cursor crearion
     )
 
-    def __init__(self, cursor=None, offset=0, size=sys.maxsize, flags=0):
+    def __init__(self, mman, path_or_fd, offset=0, size=0, flags=0):
         """Initalize the instance to operate on the given cursor.
-        :param cursor: if not None, the associated cursor to the file you want to access
-            If None, you have call begin_access before using the buffer and provide a cursor
+
+        :param cursor: the cursor to the file you want to access
         :param offset: absolute offset in bytes
-        :param size: the total size of the mapping. Defaults to the maximum possible size
+        :param size: the total size of the mapping. non-positives mean, as big possible.
             From that point on, the __len__ of the buffer will be the given size or the file size.
             If the size is larger than the mappable area, you can only access the actually available
             area, although the length of the buffer is reported to be your given size.
             Hence it is in your own interest to provide a proper size !
         :param flags: Additional flags to be passed to os.open
         :raise ValueError: if the buffer could not achieve a valid state"""
-        self._c = cursor
-        if cursor and not self.begin_access(cursor, offset, size, flags):
-            raise ValueError("Failed to allocate the buffer - probably the given offset is out of bounds")
-        # END handle offset
-
-    def __del__(self):
-        self.end_access()
+        self.flags = flags
+        rlist = mman.get_or_create_rlist(path_or_fd)
+        avail_size = rlist.file_size() - offset
+        if 0 < size < avail_size:
+            avail_size = size
+        super(SlidingWindowMapBuffer, self).__init__(mman, path_or_fd, offset, avail_size)
+        self._c = None
 
     def __enter__(self):
+        self._c = self.mman.make_cursor(self.path_or_fd, self.ofs, self.size, self.flags)
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.end_access()
-
-    def __len__(self):
-        return self._size
+        self.release()
 
     def __getitem__(self, i):
         if isinstance(i, slice):
-            return self.__getslice__(i.start or 0, i.stop or self._size)
+            return self.__getslice__(i.start or 0, i.stop or self.size)
         c = self._c
-        assert c.is_valid()
+        assert not c.closed
         if i < 0:
-            i = self._size + i
+            i = self.size + i
         if not c.includes_ofs(i):
-            c.use_region(i, 1)
+            c.release()
+            self._c = c = c.make_cursor(i, 1)
         # END handle region usage
-        return c.buffer()[i - c.ofs_begin()]
+        return c.buffer()[i - c.ofs]
 
     def __getslice__(self, i, j):
         c = self._c
         # fast path, slice fully included - safes a concatenate operation and
         # should be the default
-        assert c.is_valid()
+        assert not c.closed
         if i < 0:
-            i = self._size + i
+            i = self.size + i
         if j == sys.maxsize:
-            j = self._size
+            j = self.size
         if j < 0:
-            j = self._size + j
-        if (c.ofs_begin() <= i) and (j < c.ofs_end()):
-            b = c.ofs_begin()
+            j = self.size + j
+        if (c.ofs <= i) and (j < c.ofs_end):
+            b = c.ofs
             return c.buffer()[i - b:j - b]
         else:
             l = j - i                 # total length
@@ -91,8 +91,8 @@ class SlidingWindowMapBuffer(object):
                 # Memory view cannot be joined below python 3.4 ...
                 out = bytes()
                 while l:
-                    c.use_region(ofs, l)
-                    assert c.is_valid()
+                    c.release()
+                    self._c = c = c.make_cursor(ofs, l)
                     d = c.buffer()[:l]
                     ofs += len(d)
                     l -= len(d)
@@ -104,13 +104,13 @@ class SlidingWindowMapBuffer(object):
             else:
                 md = []
                 while l:
-                    c.use_region(ofs, l)
-                    assert c.is_valid()
+                    c.release()
+                    self._c = c = c.make_cursor(ofs, l)
                     d = c.buffer()[:l]
                     ofs += len(d)
                     l -= len(d)
-                    # Make sure we don't keep references, as c.use_region() might attempt to free resources, but
-                    # can't unless we use pure bytes
+                    # Make sure we don't keep references, as c.use_region() might attempt
+                    # to free resources, but can't unless we use pure bytes
                     if hasattr(d, 'tobytes'):
                         d = d.tobytes()
                     md.append(d)
@@ -119,47 +119,22 @@ class SlidingWindowMapBuffer(object):
         # END fast or slow path
     #{ Interface
 
-    def begin_access(self, cursor=None, offset=0, size=sys.maxsize, flags=0):
-        """Call this before the first use of this instance. The method was already
-        called by the constructor in case sufficient information was provided.
+    @property
+    def closed(self):
+        assert not self._c or not self._c.closed
+        return not bool(self._c)
 
-        For more information no the parameters, see the __init__ method
-        :param path: if cursor is None the existing one will be used.
-        :return: True if the buffer can be used"""
-        if cursor:
-            self._c = cursor
-        # END update our cursor
-
-        # reuse existing cursors if possible
-        if self._c is not None and self._c.is_associated():
-            res = self._c.use_region(offset, size, flags).is_valid()
-            if res:
-                # if given size is too large or default, we computer a proper size
-                # If its smaller, we assume the combination between offset and size
-                # as chosen by the user is correct and use it !
-                # If not, the user is in trouble.
-                if size > self._c.file_size():
-                    size = self._c.file_size() - offset
-                # END handle size
-                self._size = size
-            # END set size
-            return res
-        # END use our cursor
-        return False
-
-    def end_access(self):
+    def release(self):
         """Call this method once you are done using the instance. It is automatically
-        called on destruction, and should be called just in time to allow system
+        destroys cursor, and should be called just in time to allow system
         resources to be freed.
+        """
+        self._c.release()
+        self._c = None
 
-        Once you called end_access, you must call begin access before reusing this instance!"""
-        self._size = 0
-        if self._c is not None:
-            self._c.unuse_region()
-        # END unuse region
-
+    @property
     def cursor(self):
-        """:return: the currently set cursor which provides access to the data"""
+        """:return: the current cursor providing access to the data, which is None initially"""
         return self._c
 
     #}END interface

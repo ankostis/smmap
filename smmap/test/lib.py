@@ -15,7 +15,7 @@ class FileCreator(object):
     Once it gets deleted, it will remove the temporary file as well."""
     __slots__ = ("_size", "_path")
 
-    def __init__(self, size, prefix=''):
+    def __init__(self, size, prefix='', final_byte=b'1'):
         assert size, "Require size to be larger 0"
 
         self._path = tempfile.mktemp(prefix=prefix)
@@ -23,7 +23,7 @@ class FileCreator(object):
 
         with open(self._path, "wb") as fp:
             fp.seek(size - 1)
-            fp.write(b'1')
+            fp.write(final_byte)
 
         assert os.path.getsize(self.path) == size
 
