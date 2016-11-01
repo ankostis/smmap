@@ -8,10 +8,8 @@ Cursors/Regiond Differences
 
 """
 import logging
-from mmap import mmap, ACCESS_READ
-import os
 
-from smmap.util import buffer, string_types
+from smmap.util import buffer, finalize
 
 
 __all__ = ["WindowCursor", "MapRegion"]
@@ -36,7 +34,9 @@ class _WindowHandle(object):
         'mman',         # the manger keeping all file regions
         'path_or_fd',   # the file we are acting upon
         'ofs',          # the absolute offset from the actually mapped area to our start area
-        'size'          # maximum size we should provide
+        'size',         # maximum size we should provide
+        '_finalize',    # To replace __del_
+        '__weakref__',  # To replace __del_
     )
 
     def __init__(self, mman, path_or_fd, ofs=0, size=0):
@@ -44,6 +44,7 @@ class _WindowHandle(object):
         self.path_or_fd = path_or_fd
         self.ofs = ofs
         self.size = size
+        self._finalize = finalize(self, self.release)
 
     def __repr__(self):
         return "%s(%s, %i, %i)" % (type(self).__name__, self.path_or_fd, self.ofs, self.size)
@@ -57,12 +58,15 @@ class _WindowHandle(object):
     def __enter__(self):
         return self
 
-    def __del__(self):
-        self.close()
-
     def __exit__(self, exc_type, exc_value, traceback):
         """"Will raises if it has been double-entered."""
-        self.release()
+        try:
+            self.release()
+        except Exception as ex:
+            if exc_type:
+                log.warning('Hidden exit-exception on %s: %s' % (self, ex), exc_info=1)
+            else:
+                raise ex
 
     def close(self):
         """Closes the current windows. Does nothing if already closed."""
@@ -126,7 +130,7 @@ class WindowCursor(_WindowHandle):
 
     @property
     def closed(self):
-        return not self.mman.is_cursor_valid(self)
+        return self.mman.is_cursor_closed(self)
 
     def make_cursor(self, offset=None, size=None, flags=None):
         """:return: a new cursor for the new offset/size/flags.
@@ -173,7 +177,7 @@ class WindowCursor(_WindowHandle):
         :return: the underlying raw memory map. Please not that the offset and size is likely to be different
             to what you set as offset and size. Use it only if you are sure about the region it maps, which is the whole
             file in case of StaticWindowMapManager"""
-        return self.region.map()
+        return self.region.buffer()
 
     @property
     def region(self):
@@ -188,58 +192,27 @@ class WindowCursor(_WindowHandle):
 class MapRegion(_WindowHandle):
 
     """Defines a mapped region of memory, aligned to pagesizes
+
+    :ivar path_or_fd:
+        path to the file to map, or the opened file descriptor
+    :ivar ofs:
+        **aligned** offset into the file to be mapped
+    :ivar size:
+        if size is larger then the file on disk, the whole file will be
+        allocated the the size automatically adjusted
+
+        .. Note::
+            The actually size may be smaller than requested, either because
+            the file-size is smaller, or the map was created between two existing regions.
+
     """
-    __slots__ = [
-        '_mf',      # mapped memory chunk (as returned by mmap)
-        '__weakref__'
-    ]
-
-    def __init__(self, mman, path_or_fd, ofs=0, size=0, flags=0):
-        """Initialize a region, allocate the memory map
-        :param path_or_fd:
-            path to the file to map, or the opened file descriptor
-        :param ofs:
-            **aligned** offset into the file to be mapped
-        :param size:
-            if size is larger then the file on disk, the whole file will be
-            allocated the the size automatically adjusted
-
-            .. Note::
-                The actually size may be smaller than requested, either because
-                the file-size is smaller, or the map was created between two existing regions.
-
-        :param flags:
-            additional flags to be given when opening the file.
-        :raise Exception:
-            if no memory can be allocated
-
-        .. Warning::
-            In case of error (i.e. not enough memory) and an open fd was passed in,
-            the client is responsible to close it!
-        """
-        ## TODO: Move to `mman`.
-        if isinstance(path_or_fd, int):
-            fd = path_or_fd
-        else:
-            fd = os.open(path_or_fd, os.O_RDONLY | getattr(os, 'O_BINARY', 0) | flags)
-
-        try:
-            requested_size = min(os.fstat(fd).st_size - ofs, size)
-            self._mf = mmap(fd, requested_size, access=ACCESS_READ, offset=ofs)
-
-            actual_size = len(self._mf)
-            super(MapRegion, self).__init__(mman, path_or_fd, ofs, actual_size)
-        finally:
-            ## Only close it if we opened it.
-            #
-            if not isinstance(path_or_fd, int):
-                os.close(fd)
+    __slots__ = ()
 
     #{ Interface
 
     @property
     def closed(self):
-        return self._mf is None
+        return self.mman.is_region_closed(self)
 
     def cursors(self):
         """:return: a tuple of all cursors bound to the region"""
@@ -247,11 +220,7 @@ class MapRegion(_WindowHandle):
 
     def buffer(self):
         """:return: a buffer containing the memory"""
-        return self._mf
-
-    def map(self):
-        """:return: a memory map containing the memory"""
-        return self._mf
+        return self.mman.mmap_for_region(self)
 
     def release(self):
         """Release all resources this instance might hold.

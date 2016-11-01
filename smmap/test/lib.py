@@ -2,9 +2,11 @@
 from unittest import TestCase
 import os
 import tempfile
+import logging
 
 __all__ = ['TestBase', 'FileCreator']
 
+logging.basicConfig(level=0)
 
 #{ Utilities
 

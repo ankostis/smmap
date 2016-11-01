@@ -14,6 +14,7 @@ from smmap.mman import align_to_mmap
 from smmap.util import PY3
 
 from .lib import TestBase, FileCreator
+from smmap.buf import SlidingWindowMapBuffer
 
 
 class TestMMan(TestBase):
@@ -112,11 +113,10 @@ class TestMMan(TestBase):
     def test_memory_manager_close_with_active_regions(self):
         with FileCreator(self.k_window_test_size, "manager_test") as fc:
             with SlidingWindowMapManager() as mman:
-                with self.assertRaisesRegex(AssertionError, 'Missing CURSOR'):
-                    with mman.make_cursor(fc.path):
-                        exmsg = 'closed with 1 active-regions, held by 1 cursors.'
-                        with self.assertRaisesRegex(ValueError, exmsg):
-                            mman.close()
+                ## Check that `cursors.close()` without complaints if `mman` has closed prematurely
+                with mman.make_cursor(fc.path):
+                    exmsg = "with 1 active-Regions, held by 1 Cursors!"
+                    self.assertRaisesRegex(ValueError, exmsg, mman.close)
 
     def test_memman_operation(self):
         # test more access, force it to actually unmap regions
@@ -137,7 +137,8 @@ class TestMMan(TestBase):
                             with man.make_cursor(item) as c:
                                 # still empty (more about that is tested in test_memory_manager()
                                 assert man.num_open_cursors == 1
-                                assert man.mapped_memory_size == fc.size
+                                if not isinstance(man, SlidingWindowMapManager):
+                                    assert man.mapped_memory_size == fc.size
 
                             base_offset = 5000
                             # window size is 0 for static managers, hence size will be 0.
@@ -168,11 +169,10 @@ class TestMMan(TestBase):
                             # it is a still the same window
                             nsize = (size or fc.size) - 10
                             with c.make_cursor(0, nsize) as c:
+                                assert c.region is rr
                                 if man.max_memory_size == fc.size:
-                                    assert c.region is rr
                                     assert man.num_open_regions == 2
                                 else:
-                                    assert c.region is not rr
                                     assert man.num_open_regions == 1
                                 assert c.size == nsize
                                 assert c.ofs == 0

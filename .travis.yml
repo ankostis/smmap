@@ -17,6 +17,7 @@ env:
   - TMPDIR="/tmp/καλημέρα"
 install:
   - pip install coveralls
+  - pip install -r requirements
   - ln -s /tmp "$TMPDIR"
 script:
   - ulimit -n 48

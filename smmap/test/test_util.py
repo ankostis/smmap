@@ -1,5 +1,5 @@
 from smmap.test.lib import TestBase
-from smmap.util import Relation
+from smmap.util import Relation, ExitStack
 
 
 class TestUtils(TestBase):
@@ -73,3 +73,57 @@ class TestUtils(TestBase):
         assert rg.take(3) == (3, None)
         self.assertRaises(KeyError, rg.take, 3)
         self.assertRaises(KeyError, rg.take, None)
+
+    def test_rollback_put_ok(self):
+        rg = Relation(one2one=True)
+        rg.put(0, 0)
+
+        with rg:
+            rg.put(1, 11)
+            rg.put(2, 22)
+            d = rg.copy()
+
+            d = rg.copy()
+        self.assertEqual(d, rg)
+
+    def test_rollback_take_ok(self):
+        rg = Relation(one2one=True)
+        rg.put(0, 0)
+        rg.put(1, 11)
+        rg.put(2, 22)
+
+        with rg:
+            rg.take(1)
+            rg.take(2)
+            d = rg.copy()
+        self.assertEqual(d, rg)
+
+    def test_rollback_put_ail(self):
+        rg = Relation(one2one=True)
+        rg.put(0, 0)
+        d = rg.copy()
+
+        try:
+            with rg:
+                rg.put(1, 11)
+                rg.put(2, 22)
+                raise Exception()
+        except:
+            pass
+        self.assertEqual(d, rg)
+
+    def test_rollback_take_fail(self):
+        rg = Relation(one2one=True)
+        rg.put(0, 0)
+        rg.put(1, 11)
+        rg.put(2, 22)
+        d = rg.copy()
+
+        try:
+            with rg:
+                rg.take(1)
+                rg.take(2)
+                raise Exception()
+        except:
+            pass
+        self.assertEqual(d, rg)
