@@ -69,19 +69,20 @@ class suppress:
         return supp
 
 
-class Relations(dict):
-    """Maintains the integrity of a "1-to-1" or "N-to-1" mappings.
+class Relation(dict):
+    """A single-threaded with integrity checked "1-to-1" or "N-to-1" mapping.
 
-    The "1-1" flavor is inversible through `.inv` property.
+    The "1-1" flavor is invertible through `inv` property.
 
-    Assertions supported:
+    Any integrity errors are reported as :class:`KeyError` and *do not modify the mapping*.
+
+    Integrity checks supported:
 
     - insertion/removal: null key-values
     - insertion: pre-existing key
     - insertion: non-unique values ("1-1" mappings only)
     - removal: non-existing key
-    - removal: null popped value
-    - removal: popped value mismcatch popped key (1-1 only)
+    - removal: popped value mismatch popped key (1-1 only, with `is` comparison)
 
     """
     __slots__ = ('name',
@@ -93,6 +94,12 @@ class Relations(dict):
                  'kname',           #: label printed in messages
                  'vname',           #: label printed in messages
                  )
+
+    class _Missing():
+        def __repr__(self):
+            return "<MISSING>"
+
+    MISSING = _Missing()
 
     def __init__(self, name='', one2one=False,
                  null_keys=False, null_values=False,
@@ -117,18 +124,25 @@ class Relations(dict):
         self.vname = vname
 
     def put(self, k, v):
+        action = 'PUT'
         kname = self.kname
         vname = self.vname
         inverse = self.inv
 
         ok = False
         try:
-            assert self.null_keys or k, self._err_msg("Null", kname, k, v)
-            assert self.null_values or v, self._err_msg("Null", vname, k, v)
-            assert k not in self, self._err_msg("Already", kname, k, v)
+            if not self.null_keys and k is None:
+                raise KeyError(self._err_msg(action, "Null %s" % kname, k, v))
+            if not self.null_values and v is None:
+                raise KeyError(self._err_msg(action, "Null %s" % vname, k, v))
+            vv = self.get(k, Relation.MISSING)
+            if vv is not Relation.MISSING:
+                raise KeyError(self._err_msg(action, "%s already mapped to %s" % (kname, vv), k, v))
 
             if inverse is not None:
-                assert v not in inverse, self._err_msg("Already", vname, k, v)
+                kk = inverse.get(v, Relation.MISSING)
+                if kk is not Relation.MISSING:
+                    raise KeyError(self._err_msg(action, "%s already invert-mapped to %s" % (vname, kk), k, v))
                 inverse[v] = k
             self[k] = v
 
@@ -139,25 +153,26 @@ class Relations(dict):
                     self.on_put_error(self, k, v)
 
     def take(self, k):
+        action = 'TAKE'
         kname = self.kname
         vname = self.vname
         inverse = self.inv
 
         ok = False
         try:
-            v = self.get(k)
-
-            assert self.null_keys or k, self._err_msg("Null", kname, k, v)
-            assert k in self, self._err_msg("Missing", kname, k, v)
+            v = self.get(k, Relation.MISSING)
+            if v is Relation.MISSING:
+                raise KeyError(self._err_msg(action, "Missing %s" % kname, k, v))
 
             if inverse:
-                assert v in inverse, self._err_msg("Missing", vname, k, v)
-                kk = inverse.get(v)
-                assert k is kk, self._err_msg("Missmatch", vname, k, v, kk)
+                kk = inverse.get(v, Relation.MISSING)
+                if kk is Relation.MISSING:
+                    raise KeyError(self._err_msg(action, "Missing invert-%s" % vname, k, v))
+                if k is not kk:
+                    raise KeyError(self._err_msg(action, "Mismatch %s with inverted: %r <> %r" %
+                                                 (kname, k, kk), k, v))
                 del inverse[v]
             del self[k]
-
-            assert self.null_values or bool(v), self._err_msg("Empty", vname, k)
 
             ok = True
         finally:
@@ -167,9 +182,7 @@ class Relations(dict):
 
         return (k, v)
 
-    def _err_msg(self, msg, item, k, v):
+    def _err_msg(self, action, msg, k, v):
         link = '-->' if self.inv is None else '<->'
-        return '%s(%s %s %s): %s %s(k=%s, v=%s)\n  %s' % (
-            self.name, self.kname, link, self.vname, msg, item, k, v, self)
-
-#} END utility classes
+        return '%s %s(%s %s %s): %s (key: %s, value: %s)\n  %s' % (
+            action, self.name, self.kname, link, self.vname, msg, k, v, self)

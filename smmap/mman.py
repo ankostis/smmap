@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 
-from smmap.util import string_types, Relations, PY3
+from smmap.util import string_types, Relation, PY3
 
 from .mwindow import (
     WindowCursor,
@@ -187,8 +187,8 @@ class StaticWindowMapManager(object):
         :param max_open_handles: if not maxint, limit the amount of open file handles to the given number.
             Otherwise the amount is only limited by the system itself. If a system or soft limit is hit,
             the manager will free as many handles as possible"""
-        self._ix_path_rlist = Relations(one2one=1, kname='PATH_OR_FD', vname='RLIST')
-        self._ix_cur_reg = Relations(kname='CURSOR', vname='REGION')
+        self._ix_path_rlist = Relation(one2one=1, kname='PATH_OR_FD', vname='RLIST')
+        self._ix_cur_reg = Relation(kname='CURSOR', vname='REGION')
         self._ix_reg_lru = OrderedDict()
         self.max_handle_count = max_open_handles
 
