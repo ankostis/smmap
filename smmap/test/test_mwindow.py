@@ -43,9 +43,9 @@ class TestMWindow(TestBase):
                 half_size = fc.size // 2
                 rofs = align_to_mmap(4200, False)
                 finfo = mman._get_or_create_finfo(fc.path)
-                rfull = mman._make_region(finfo, ofs=0, size=fc.size)
-                rhalfofs = mman._make_region(finfo, ofs=rofs, size=fc.size)
-                rhalfsize = mman._make_region(finfo, ofs=0, size=half_size)
+                rfull = mman._open_region(finfo, ofs=0, size=fc.size)
+                rhalfofs = mman._open_region(finfo, ofs=rofs, size=fc.size)
+                rhalfsize = mman._open_region(finfo, ofs=0, size=half_size)
 
                 # offsets
                 assert rfull.ofs == 0 and rfull.size == fc.size

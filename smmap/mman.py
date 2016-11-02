@@ -245,10 +245,12 @@ class MemmapManager(object):
                 self.num_open_regions, self.num_used_regions,
                 self.num_open_cursors)
 
-    def _make_region(self, finfo, ofs=0, size=0, flags=0):
+    def _open_region(self, finfo, ofs=0, size=0, flags=0):
         # type: (List[MemmapRegion], int, int, int, int) -> MemmapRegion
         """
-        Creates and wraps the actual mmap in a region according to the given boundaries.
+        Opens the os-level mmap according to the given boundaries, wraps it in a region and registers it.
+
+        Don't use that - use :meth:`_obtain_region()` (which invokes this).
 
         :param flags:
             additional flags to be given when opening the file.
@@ -259,29 +261,23 @@ class MemmapManager(object):
             In case of error (i.e. not enough memory) and an open fd was passed in,
             the client is responsible to close it!
         """
-        path_or_fd = finfo.path_or_fd
-        is_file_open = isinstance(path_or_fd, int)
-        if is_file_open:
-            fd = path_or_fd
-        else:
-            fd = os.open(path_or_fd, os.O_RDONLY | getattr(os, 'O_BINARY', 0) | flags)
-
+        fd = finfo.path_or_fd
+        is_path = not isinstance(fd, int)
+        if is_path:
+            fd = os.open(fd, os.O_RDONLY | getattr(os, 'O_BINARY', 0) | flags)
         try:
-            requested_size = min(os.fstat(fd).st_size - ofs, size)
+            requested_size = min(finfo.file_size - ofs, size)
             memmap = mmap.mmap(fd, requested_size, access=mmap.ACCESS_READ, offset=ofs)
-            ok = False
             try:
-                actual_size = len(memmap)
-                region = self.MapRegionCls(self, finfo, ofs, actual_size)
+                region = self.MapRegionCls(self, finfo, ofs, len(memmap))
                 self._ix_reg_mmap.put(region, memmap)
-                ok = True
-            finally:
-                if not ok:
-                    memmap.close()
+            except:
+                memmap.close()
+                raise
         finally:
             ## Only close it if we opened it.
             #
-            if not is_file_open:
+            if is_path:
                 os.close(fd)
 
             return region
@@ -645,7 +641,7 @@ class GreedyMemmapManager(MemmapManager):
                 is_recursive = True  # Don't recurse below, just cleaned all there is.
 
             try:
-                r = self._make_region(finfo, 0, sys.maxsize, flags)
+                r = self._open_region(finfo, 0, sys.maxsize, flags)
             except Exception:
                 ## Apparently we are out of system resources.
                 #  We free up as many regions as possible and retry,
@@ -770,7 +766,7 @@ class TilingMemmapManager(MemmapManager):
 
             # insert new region at the right offset to keep the order
             try:
-                r = self._make_region(finfo, mid.ofs, mid.size, flags)
+                r = self._open_region(finfo, mid.ofs, mid.size, flags)
             except Exception:
                 ## Apparently we are out of system resources.
                 #  We free up as many regions as possible and retry,
