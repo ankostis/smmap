@@ -224,6 +224,12 @@ class MemmapManager(object):
     def _wrap_index_ex(self, rel, action, key, val, ex):
         raise MemmapManagerError(*ex.args)
 
+    def __repr__(self):
+        return "%s(winize=%s, files=%s, regs=(%s, %s), curs=%s)" % (
+            type(self).__name__, self.window_size, self.num_open_files,
+            self.num_open_regions, self.num_used_regions,
+            self.num_open_cursors)
+
     def _make_region(self, finfo, ofs=0, size=0, flags=0):
         # type: (List[MapRegion], int, int, int, int) -> MapRegion
         """
@@ -322,8 +328,8 @@ class MemmapManager(object):
         """
         if self.closed:
             return
-        n_cursors = self.num_open_cursors
-        n_active_regions = self.num_open_regions
+        status_str = str(self)
+        n_used_regions = self.num_used_regions
         mmap_errors = []
         for memmap in self._ix_reg_mmap.values():
             try:
@@ -336,15 +342,14 @@ class MemmapManager(object):
 
         ## Now report errors encountered.
         #
-        if n_cursors or mmap_errors:
+        if n_used_regions or mmap_errors:
             if mmap_errors:
-                mmap_msg = ", and %s MMap closing-failures: \n  %s" % (
-                    len(mmap_errors), '\n  '.join(str(e) for e in mmap_errors))
+                mmap_msg = "\n  MMap closing-failures: \n    %s" % (
+                    len(mmap_errors), '\n    '.join(str(e) for e in mmap_errors))
             else:
                 mmap_msg = ''
 
-            msg = "Closed %s with %s active-Regions, held by %s Cursors%s!" % (
-                self, n_active_regions, n_cursors, mmap_msg)
+            msg = "Closed %s which had active handles!%s" % (status_str, mmap_msg)
 
             raise ValueError(msg)
 
@@ -358,7 +363,8 @@ class MemmapManager(object):
     def regions_for_path(self, path_or_fd):
         return [r for r in self._ix_reg_mmap if r.finfo.path_or_fd == path_or_fd]
 
-    def mmap_for_region(self, region):
+    def _mmap_for_region(self, region):
+        """Use it only for debuggging."""
         return self._ix_reg_mmap.get(region)
 
     def region_for_cursor(self, cursor):

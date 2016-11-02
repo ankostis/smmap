@@ -146,7 +146,7 @@ class MapRegion(WindowHandle):
 
     def buffer(self):
         """:return: a buffer containing the memory"""
-        return self.mman.mmap_for_region(self)
+        return self.mman._mmap_for_region(self)
 
     def release(self):
         """Release all resources this instance might hold.

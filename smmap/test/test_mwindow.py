@@ -90,9 +90,10 @@ class TestMWindow(TestBase):
         with FileCreator(1024 * 1024 * 8) as fc:
             #with self.assertRaisesRegex(ValueError, "cannot close exported pointers exist"):
                 with TilingMemmapManager() as mman:
-                    with mman.make_cursor(fc.path) as c:
-                        data = memoryview(c.map())
-                        assert data[0:5] == b'\x00\x00\x00\x00\x00'
+                    c = mman.make_cursor(fc.path)
+                    memmap = mman._mmap_for_region(c.region)
+                    data = memoryview(memmap)
+                    assert data[0:5] == b'\x00\x00\x00\x00\x00'
                 assert data[3] == 0
             #data.release()
             #mman.close()

@@ -138,7 +138,7 @@ class TestMMan(TestBase):
             with TilingMemmapManager() as mman:
                 ## Check that `cursors.close()` without complaints if `mman` has closed prematurely
                 with mman.make_cursor(fc.path):
-                    exmsg = "with 1 active-Regions, held by 1 Cursors!"
+                    exmsg = r"files=1, regs=\(1, 1\), curs=1"
                     self.assertRaisesRegex(ValueError, exmsg, mman.close)
 
     def test_memman_operation(self):
