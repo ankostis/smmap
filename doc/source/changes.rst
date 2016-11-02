@@ -17,7 +17,7 @@ BREAKING CHANGES, actually a new project!
     
   - the immutable **window-handles** (class:`smmap.mwindow.WindowHandle`) 
     further divided into:
-    -  the **regions** (class:`smmap.mwindow.MMapRegion`), that represent actual 
+    -  the **regions** (class:`smmap.mwindow.MemmapRegion`), that represent actual 
        os-level :class:`mmap.mmap`, and ...
     -  the **cursors**, the client-facing handles into memory mapped files, 
        which are further subdivided into:

@@ -13,7 +13,7 @@ from smmap.util import buffer, finalize
 import sys
 
 
-__all__ = ["FixedWindowCursor", "SlidingWindowCursor", "MapRegion"]
+__all__ = ["FixedWindowCursor", "SlidingWindowCursor", "MemmapRegion"]
 
 log = logging.getLogger(__name__)
 
@@ -21,6 +21,17 @@ log = logging.getLogger(__name__)
 class WindowHandle(object):
     """
     Abstract non-re-entrant no-reusable context-manager for a mman-managed memory window into a file.
+
+    :ivar mman:
+        the manger keeping all windows regions
+    :ivar finfo:
+        the file to map, or the opened file descriptor
+    :ivar finfo:
+        the file we are acting upon
+    :ivar ofs:
+        the absolute offset from the actually mapped area to our start area
+    :ivar size:
+        maximum size we should provide
 
     @property
     def self.closed():
@@ -33,7 +44,7 @@ class WindowHandle(object):
 
     __slots__ = (
         'mman',         # the manger keeping all file regions
-        'finfo',   # the file we are acting upon
+        'finfo',        # the file we are acting upon
         'ofs',          # the absolute offset from the actually mapped area to our start area
         'size',         # maximum size we should provide
         '_finalize',    # To replace __del_
@@ -115,12 +126,10 @@ class WindowHandle(object):
         return self.ofs <= ofs < self.ofs + self.size
 
 
-class MapRegion(WindowHandle):
+class MemmapRegion(WindowHandle):
 
-    """Defines a mapped region of memory, aligned to pagesizes
+    """Encapsulates the os-level `mmap` handle, which is aligned to pagesizes.
 
-    :ivar path_or_fd:
-        path to the file to map, or the opened file descriptor
     :ivar ofs:
         **aligned** offset into the file to be mapped
     :ivar size:

@@ -9,7 +9,7 @@ from smmap.util import string_types, Relation, PY3, finalize
 
 from .mwindow import (
     FixedWindowCursor,
-    MapRegion,
+    MemmapRegion,
 )
 from .util import (
     is_64_bit,
@@ -177,7 +177,7 @@ class MemmapManager(object):
 
     #{ Configuration
     _MapWindowCls = _MapWindow
-    MapRegionCls = MapRegion
+    MapRegionCls = MemmapRegion
     WindowCursorCls = FixedWindowCursor
     #} END configuration
 
@@ -231,7 +231,7 @@ class MemmapManager(object):
             self.num_open_cursors)
 
     def _make_region(self, finfo, ofs=0, size=0, flags=0):
-        # type: (List[MapRegion], int, int, int, int) -> MapRegion
+        # type: (List[MemmapRegion], int, int, int, int) -> MemmapRegion
         """
         Creates and wraps the actual mmap in a region according to the given boundaries.
 
