@@ -198,6 +198,12 @@ class Relation(MutableMapping):
     def __len__(self):
         return len(self.rel)
 
+    def __str__(self):
+        return str(self.rel)
+
+    def __repr__(self):
+        return repr(self.rel)
+
     def copy(self):
         return self.rel.copy()
 
@@ -275,8 +281,9 @@ class Relation(MutableMapping):
 
     def _err_msg(self, action, msg, k, v):
         link = '-->' if self.inv is None else '<->'
+        me = '\n  '.join(str(self).split('\n'))  # indent by 2
         return '%s %s{%s%s%s}: %s (key: %s, value: %s)\n  %s' % (
-            action, self.name, self.kname, link, self.vname, msg, k, v, self)
+            action, self.name, self.kname, link, self.vname, msg, k, v, me)
 
     def hit(self, k):
         """Maintain LRU, by moving key to the end."""
