@@ -280,7 +280,7 @@ class MemmapManager(object):
             if is_path:
                 os.close(fd)
 
-            return region
+        return region
 
     def _purge_lru_regions(self, size_to_free):
         """Release LRU regions with no clients to satisfy memory/mmep-handle criteria.
