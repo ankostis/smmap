@@ -5,8 +5,7 @@ from random import randint
 import sys
 from time import time
 
-from smmap.mman import _MapWindow, align_to_mmap, TilingMemmapManager, GreedyMemmapManager, MemmapManagerError
-from smmap.util import PY3
+from smmap.mman import _MapWindow, align_to_mmap, TilingMemmapManager, GreedyMemmapManager
 
 from smmap.mwindow import FixedWindowCursor, SlidingWindowCursor
 
@@ -84,19 +83,6 @@ class TestMWindow(TestBase):
             self.assertRaises(Exception, cv.release)
             # yet close() ok many time
             cv.close()
-
-    @skipIf(not PY3, "mmap is not a buffer, so memoryview fails")
-    def test_cursor_leaks_memoryviews(self):
-        with FileCreator(1024 * 1024 * 8) as fc:
-            with self.assertRaisesRegex(MemmapManagerError, "cannot close exported pointers exist"):
-                with TilingMemmapManager() as mman:
-                    c = mman.make_cursor(fc.path)
-                    memmap = mman._mmap_for_region(c.region)
-                    data = memoryview(memmap)
-                    assert data[0:5] == b'\x00\x00\x00\x00\x00'
-                assert data[3] == 0
-            data.release()
-            mman.close()
 
 
 class TestSliding(TestBase):

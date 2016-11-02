@@ -8,9 +8,9 @@ Cursors/Regiond Differences
 
 """
 import logging
-
-from smmap.util import buffer, finalize
 import sys
+
+from smmap.util import buffer, finalize, suppress
 
 
 __all__ = ["FixedWindowCursor", "SlidingWindowCursor", "MemmapRegion"]
@@ -72,13 +72,8 @@ class WindowHandle(object):
 
     def __exit__(self, exc_type, exc_value, traceback):
         """"Will raises if it has been double-entered."""
-        try:
+        with suppress(Exception if exc_type else ()):
             self.release()
-        except Exception as ex:
-            if exc_type:
-                log.warning('Hidden exit-exception on %s: %s' % (self, ex), exc_info=1)
-            else:
-                raise ex
 
     def close(self):
         """Closes the current windows. Does nothing if already closed."""

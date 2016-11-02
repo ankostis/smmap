@@ -17,6 +17,7 @@ from smmap.mman import (
 from smmap.util import PY3, is_64_bit
 
 from .lib import TestBase, FileCreator
+import logging
 
 
 try:
@@ -133,14 +134,28 @@ class TestMMan(TestBase):
                         os.close(fd)
         # END for each manasger type
 
-    @skipIf(not PY3, "missing `assertRaisesRegex()` ")
-    def test_memory_manager_close_with_active_regions(self):
+    @skipIf(not PY3, "missing `assertLogs()` ")
+    def test_mman_close_with_active_regions(self):
         with FileCreator(self.k_window_test_size, "manager_test") as fc:
             with TilingMemmapManager() as mman:
                 ## Check that `cursors.close()` without complaints if `mman` has closed prematurely
                 with mman.make_cursor(fc.path):
-                    exmsg = r"files=1, regs=\(1, 1\), curs=1"
-                    self.assertRaisesRegex(MemmapManagerError, exmsg, mman.close)
+                    with self.assertLogs(level=logging.WARNING) as logrec:
+                        mman.close()
+                    assert any(" regs=(1, 1), curs=1) active handles" in l for l in logrec.output)
+
+    @skipIf(not PY3, "mmap is not a buffer, so memoryview fails")
+    def test_mman_close_with_memoryviews(self):
+        with FileCreator(1024 * 1024 * 8) as fc:
+            with self.assertRaisesRegex(MemmapManagerError, "cannot close exported pointers exist"):
+                with TilingMemmapManager() as mman:
+                    c = mman.make_cursor(fc.path)
+                    memmap = mman._mmap_for_region(c.region)
+                    data = memoryview(memmap)
+                    assert data[0:5] == b'\x00\x00\x00\x00\x00'
+                assert data[3] == 0
+            data.release()
+            mman.close()
 
     def test_memman_operation(self):
         # test more access, force it to actually unmap regions

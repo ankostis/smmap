@@ -158,6 +158,12 @@ class MemmapManagerError(Exception):
 
     Always ``arg[0]`` is the *mem-manager*.
     """
+    def __init__(self, mman, *args):
+        super(MemmapManagerError, self).__init__(mman, *args)
+
+    def __str__(self):
+        msg = '\n  '.join(str(self.args[1]).split('\n'))  # indent by 2
+        return 'MemmapManagerError(%s): \n  %s' % (self.args[0], msg)
 
 
 class MemmapManager(object):
@@ -227,7 +233,10 @@ class MemmapManager(object):
     #{ Internal Methods
 
     def _wrap_index_ex(self, rel, action, key, val, ex):
-        raise MemmapManagerError(self, *ex.args)
+        if PY3:
+            raise MemmapManagerError(self, *ex.args) from None
+        else:
+            raise MemmapManagerError(self, *ex.args)
 
     def __repr__(self):
         if self.closed:
@@ -322,43 +331,76 @@ class MemmapManager(object):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        if exc_type:
-            with suppress(Exception):
-                self.close()
-        else:
+        with suppress(Exception if exc_type else ()):
             self.close()
 
     def close(self):
-        """Close all regions and relying memmaps.
+        """Close all regions and relying memmaps, unless resources cannot close.
 
-        :raise: any error while closing
+        :raise: MemmapManagerError or any unexpected error while closing
+
+        .. Warning::
+            In case of failures, the *mman-manager* does NOT close!
+            You have to do it later, after clearing resources (possibly in debug).
 
         .. Note::
-            Not to fail on *Windows*, all files referencing mmaps must have been closed.
-            If used as a context manager, any errors are suppressed.
+            Not to fail on *Windows*, all files and memoryviews referencing mmaps must
+            have been closed. If used as a context manager, any errors are suppressed.
+            if there is a main-body error.
         """
         if self.closed:
             return
-        status_str = str(self)
-        n_used_regions = self.num_used_regions
-        mmap_errors = []
-        for region, memmap in self._ix_reg_mmap.items():
+
+        status_str = str(self)  # for error-messages
+        used_regions = list(self._ix_cur_reg.items())
+
+        # cached vars
+        _ix_reg_mmap = self._ix_reg_mmap
+        _ix_cur_reg = self._ix_cur_reg
+
+        errors = []
+        closed_regions = []
+        for region, memmap in _ix_reg_mmap.items():
             try:
                 memmap.close()
+                closed_regions.append(region)
             except Exception as ex:
-                mmap_errors.append('%s: %s' % (region, ex))
+                errors.append('%s: %s' % (region, ex))
 
-        ## Mark this instances as "closed".
-        self._ix_reg_mmap = self._ix_path_finfo = self._ix_cur_reg = None
+        if not errors:
+            ## If everything closed fine, shutdown "quickly"
+            #  marking this instances "closed".
+            self._ix_reg_mmap = self._ix_path_finfo = self._ix_cur_reg = None
 
-        ## Now report errors encountered.
-        #
-        if n_used_regions or mmap_errors:
-            if mmap_errors:
-                mmap_msg = "\n  Number of memmap closing-failures: %s \n    %s" % (
-                    len(mmap_errors),
+            if used_regions:
+                log.warning("Closed with %s active handles: %s", status_str, status_str)
+        else:
+            #
+            # If resources were still open, do not shutdown!
+            #  Remove only those handles that were closed fine,
+            ## and report any errors encountered, before keeping this mman open.
+
+            if closed_regions:
+                closed_regions = set(closed_regions)
+                for cursor in (c
+                               for c, r in _ix_cur_reg.items()
+                               if r in closed_regions):
+                    try:
+                        self._release_cursor(cursor)
+                    except MemmapManagerError as ex:
+                        errors.append('%s: %s' % (cursor, ex))
+
+                for region in closed_regions:
+                    try:
+                        self._release_region(region)
+                    except MemmapManagerError as ex:
+                        errors.append('%s: %s' % (region, ex))
+
+            if errors:
+                mmap_msg = "\n  Number of closing-failures: %s \n    %s" % (
+                    len(errors),
                     '\n    %s '.join('%i. %s' % (i, e)
-                                     for i, e in enumerate(mmap_errors, 1)))
+                                     for i, e in enumerate(errors, 1)))
             else:
                 mmap_msg = ''
 
@@ -402,7 +444,10 @@ class MemmapManager(object):
         self._ix_reg_mmap.hit(region)  # maintain LRU
 
     def _release_region(self, region):
-        """fails if indexes not in perfect shape, but keeps them intact in that case, to retry"""
+        """Remove `region` from ``_ix_reg_mmap`` and ``_ix_path_finfo`` indexes only.
+
+        Fails if indexes not in perfect shape, but keeps them intact in that case, to retry
+        """
         if self.closed:
             return
 
@@ -418,13 +463,19 @@ class MemmapManager(object):
             memmap.close()  # Has to be the last step because it cannot rollback.
 
     def _release_cursor(self, cursor):
-        """(protected) fails if indexes not in perfect shape"""
+        """Remove `cursor` from ``_ix_cur_reg`` index only.
+
+        (protected) fails if indexes not in perfect shape
+
+        .. Note::
+            we do not release cursor's region if it becomes "unused",
+            but leave it "cached", until resources become scarce, in which case,
+            the :meth:`_purge_lru_regions()` or :meth:`close()` cleans them up.
+
+        """
         if not self.closed:
             self._ix_cur_reg.take(cursor)
             #
-            # Note: we do not release cursor's region if it's "unused",
-            #  but leave it "cached", until resources become scarce,
-            ## in which case, the `_purge_lru_regions()` cleans them up.
 
     def _get_or_create_finfo(self, path_or_fd):
         finfo = self._ix_path_finfo.get(path_or_fd)
