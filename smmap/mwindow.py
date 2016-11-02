@@ -221,13 +221,6 @@ class FixedWindowCursor(WindowHandle):
         region = self.region
         return buffer(region.buffer(), self.ofs - region.ofs, self.size)
 
-    def map(self):
-        """
-        :return: the underlying raw memory map. Please not that the offset and size is likely to be different
-            to what you set as offset and size. Use it only if you are sure about the region it maps, which is the whole
-            file in case of GreedyMemmapManager"""
-        return self.region.buffer()
-
     @property
     def region(self):
         """:return: our mapped region, or None if cursor is closed """
