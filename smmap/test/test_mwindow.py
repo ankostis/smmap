@@ -1,9 +1,9 @@
 from __future__ import print_function
+
 import os
 from random import randint
 import sys
 from time import time
-from unittest.case import skipIf
 
 from smmap.mman import _MapWindow, align_to_mmap, TilingMemmapManager, GreedyMemmapManager
 from smmap.util import PY3
@@ -11,6 +11,13 @@ from smmap.util import PY3
 from smmap.mwindow import FixedWindowCursor, SlidingWindowCursor
 
 from .lib import TestBase, FileCreator
+
+
+try:
+    from unittest import skipIf
+except ImportError:
+    from unittest2 import skipIf  # @UnusedImport
+
 
 try:
     bytes

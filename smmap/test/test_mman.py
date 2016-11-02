@@ -4,7 +4,6 @@ import os
 from random import randint
 import sys
 from time import time
-from unittest.case import skipIf
 
 from smmap.mman import (
     align_to_mmap,
@@ -17,6 +16,12 @@ from smmap.mman import (
 from smmap.util import PY3, is_64_bit
 
 from .lib import TestBase, FileCreator
+
+
+try:
+    from unittest import skipIf
+except ImportError:
+    from unittest2 import skipIf  # @UnusedImport
 
 
 class TestMMan(TestBase):
