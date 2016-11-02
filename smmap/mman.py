@@ -529,8 +529,10 @@ class MemmapManager(object):
             """
         finfo = self._get_or_create_finfo(path_or_fd)
         region = self._obtain_region(finfo, offset, size, flags, False)
-        size = min(size or finfo.file_size, region.ofs_end - offset)
-        cursor = self.WindowCursorCls(self, finfo, offset, size)
+        avail_size = min(finfo.file_size, region.ofs_end - offset)
+        if 0 < size < avail_size:
+            avail_size = size
+        cursor = self.WindowCursorCls(self, finfo, offset, avail_size)
 
         ## Register here so cursor cannot not re-validate itself.
         self._bind_cursor(cursor, region)
@@ -631,11 +633,15 @@ class GreedyMemmapManager(MemmapManager):
             assert len(rlist) == 1
             r = rlist[0]
         else:
-            size = min(size or fsize, self.window_size or fsize)   # clamp size to file-size
+            ## Clamp size to file-size/window-size
+            #
+            avail_size = min(fsize, self.window_size)
+            if 0 < size < avail_size:
+                avail_size = size
 
             if (self.mapped_memory_size + size > self.max_memory_size or
                     self.num_open_regions >= self.max_regions_count):
-                self._purge_lru_regions(size)
+                self._purge_lru_regions(avail_size)
                 is_recursive = True  # Don't recurse below, just cleaned all there is.
 
             try:
@@ -648,7 +654,7 @@ class GreedyMemmapManager(MemmapManager):
                 if is_recursive:
                     raise
                 self._purge_lru_regions(0)
-                r = self._obtain_region(finfo, offset, size, flags, True)
+                r = self._obtain_region(finfo, offset, avail_size, flags, True)
 
         assert r.includes_ofs(offset)
         return r
@@ -705,17 +711,21 @@ class TilingMemmapManager(MemmapManager):
 
         if r is None:
             window_size = self.window_size
-            size = min(size or fsize, self.window_size or fsize)   # clamp size to window size
+            ## Clamp size to file-size/window-size
+            #
+            avail_size = min(fsize, window_size)
+            if 0 < size < avail_size:
+                avail_size = size
 
             ## We honor max memory size, and assure we have enough memory available.
             #
-            if (self.mapped_memory_size + size > self.max_memory_size or
+            if (self.mapped_memory_size + avail_size > self.max_memory_size or
                     self.num_open_regions >= self.max_regions_count):
                 self._purge_lru_regions(window_size)
                 is_recursive = True  # Don't recurse below, just cleaned all there is.
 
             left = self._MapWindowCls(0, 0)
-            mid = self._MapWindowCls(offset, size)
+            mid = self._MapWindowCls(offset, avail_size)
             right = self._MapWindowCls(fsize, 0)
 
             # we assume the list remains sorted by offset
@@ -769,7 +779,7 @@ class TilingMemmapManager(MemmapManager):
                 if is_recursive:
                     raise
                 self._purge_lru_regions(0)
-                r = self._obtain_region(finfo, offset, size, flags, True)
+                r = self._obtain_region(finfo, offset, avail_size, flags, True)
             # END handle exceptions
         # END create new region
         assert r.includes_ofs(offset)
