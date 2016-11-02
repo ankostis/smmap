@@ -2,11 +2,11 @@ from copy import copy
 from mmap import ALLOCATIONGRANULARITY
 import os
 import sys
+from unittest.case import skipIf
 
 from smmap.mman import _MapWindow, align_to_mmap, SlidingWindowMapManager, _RegionList
-from smmap.util import is_64_bit
-
 from smmap.mwindow import MapRegion, WindowCursor
+from smmap.util import is_64_bit, PY3
 
 from .lib import TestBase, FileCreator
 
@@ -78,6 +78,7 @@ class TestMWindow(TestBase):
         assert align_to_mmap(1, False) == 0
         assert align_to_mmap(1, True) == ALLOCATIONGRANULARITY
 
+    @skipIf(not PY3, "mmap is not a buffer, so memoryview fails")
     def test_cursor_hangs(self):
         with FileCreator(1024 * 1024 * 8) as fc:
             #with self.assertRaisesRegex(ValueError, "cannot close exported pointers exist"):
