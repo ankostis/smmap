@@ -91,49 +91,44 @@ class TestSliding(TestBase):
         with FileCreator(self.k_window_test_size, "buffer_test") as fc:
             # invalid paths fail upon construction
             with make_mman(*man_optimal) as mman:
-                buf = SlidingWindowCursor(mman, fc.path, size=fc.size)
-                assert buf.closed
-                assert not buf.cursor
-                buf.close()
-                buf.close()
+                buf = mman.make_cursor(fc.path, size=fc.size, sliding=True)
 
-                with buf:
-                    assert not buf.closed
-                    assert buf.cursor
-                    assert len(buf) == fc.size
+                ## Born open, stays open...
+                assert not buf.closed
+                buf.close()
+                buf.close()
+                assert not buf.closed
 
                 offset = 100
-                with SlidingWindowCursor(mman, fc.path, offset) as buf:
-                    assert len(buf) == fc.size - offset
-                    assert not buf.closed
+                buf = mman.make_cursor(fc.path, offset, fc.size, sliding=True)
+                assert len(buf) == fc.size  # Actually we are extending file by `offset` bytes!
+                assert not buf.closed
 
-                # empty begin access keeps it valid on the same path, but alters the offset
+                ## Better let mman decide size.
+                buf = mman.make_cursor(fc.path, offset, 0, sliding=True)
+                assert len(buf) == fc.size - offset
+                assert not buf.closed
+
+
+                # simple access
+                with open(fc.path, 'rb') as fp:
+                    data = fp.read()
+                assert data[offset] == buf[0]
+                assert data[offset:offset * 2] == buf[0:offset]
+
+                # negative indices, partial slices
+                # Just check contextmanaging ok
                 with buf:
-                    assert len(buf) == fc.size - offset, (len(buf), fc.size)
-                    assert not buf.closed
-                    assert not buf.cursor.closed
-
-                    # simple access
-                    with open(fc.path, 'rb') as fp:
-                        data = fp.read()
-                    assert data[offset] == buf[0]
-                    assert data[offset:offset * 2] == buf[0:offset]
-
-                    # negative indices, partial slices
                     assert buf[-1] == buf[len(buf) - 1]
                     assert buf[-10:] == buf[len(buf) - 10:len(buf)]
 
-                # Double-release screams
-                #self.assertRaises(Exception, buf.release) TODO: renenable when
-                # but double-close() not.
+                ## Born open, stays open...
                 buf.close()
-                buf.close()
-                assert buf.closed
+                assert not buf.closed
 
-                # an empty begin access fixes it up again
-                with buf:
-                    assert not buf.closed
-                del(buf)        # ends access automatically
+
+                # Killing it is ok?
+                del(buf)
 
                 assert mman.num_open_regions == 1, mman.num_open_regions
 
@@ -149,50 +144,49 @@ class TestSliding(TestBase):
             max_num_accesses = 100
             fd = os.open(fc.path, os.O_RDONLY)
             for item in (fc.path, fd):
+                fsize = fc.size
                 for mman, man_id in ((man_optimal, 'optimal'),
                                      (man_worst_case, 'worst case'),
-                                     (static_man, 'static optimal')):
+                                     ):
                     with make_mman(*mman) as manager:
-                        with SlidingWindowCursor(manager, item) as buf:
-                            assert manager.num_open_regions == 1
-                            for access_mode in range(2):    # single, multi
-                                num_accesses_left = max_num_accesses
-                                num_bytes = 0
-                                fsize = fc.size
+                        buf = manager.make_cursor(item, sliding=True)
+                        assert manager.num_open_regions == 0, manager
+                        for access_mode in range(2):    # single, multi
+                            num_accesses_left = max_num_accesses
+                            num_bytes = 0
 
-                                st = time()
-                                while num_accesses_left:
-                                    num_accesses_left -= 1
-                                    if access_mode:  # multi
-                                        ofs_start = randint(0, fsize)
-                                        ofs_end = randint(ofs_start, fsize)
-                                        d = buf[ofs_start:ofs_end]
-                                        assert len(d) == ofs_end - ofs_start
-                                        assert d == data[ofs_start:ofs_end]
-                                        num_bytes += len(d)
-                                        del d
-                                    else:
-                                        pos = randint(0, fsize)
-                                        assert buf[pos] == data[pos]
-                                        num_bytes += 1
-                                    # END handle mode
-                                # END handle num accesses
-
-                            assert manager.num_open_regions
-                            if isinstance(manager, TilingMemmapManager):
-                                assert manager.num_open_regions >= 1
-                            else:
-                                assert manager.num_open_regions == 1
-                            assert manager.num_used_regions == 1
-                            if isinstance(manager, TilingMemmapManager):
-                                assert manager.collect() >= 0
-                            else:
-                                assert manager.collect() == 0    # all regions currently used by buf
+                            st = time()
+                            while num_accesses_left:
+                                num_accesses_left -= 1
+                                if access_mode:  # multi
+                                    ofs_start = randint(0, fsize)
+                                    ofs_end = randint(ofs_start, fsize)
+                                    d = buf[ofs_start:ofs_end]
+                                    assert len(d) == ofs_end - ofs_start
+                                    assert d == data[ofs_start:ofs_end]
+                                    num_bytes += len(d)
+                                    del d
+                                else:
+                                    pos = randint(0, fsize)
+                                    assert buf[pos] == data[pos]
+                                    num_bytes += 1
+                                # END handle mode
+                            # END handle num accesses
 
                         assert manager.num_open_regions
-                        assert manager.num_open_regions == 1
+                        if isinstance(manager, TilingMemmapManager):
+                            assert manager.num_open_regions >= 1
+                        else:
+                            assert manager.num_open_regions == 1
                         assert manager.num_used_regions == 0
-                        assert manager.collect() == 1
+                        if isinstance(manager, TilingMemmapManager):
+                            assert manager.collect() >= 0
+                        else:
+                            assert manager.collect() == 0    # all regions currently used by buf
+
+                        assert manager.num_open_regions == 0
+                        assert manager.num_used_regions == 0
+                        assert manager.collect() == 0
                         elapsed = max(time() - st, 0.001)  # prevent zero division errors on windows
                         mb = float(1000 * 1000)
                         mode_str = (access_mode and "slice") or "single byte"

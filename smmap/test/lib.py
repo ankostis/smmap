@@ -29,7 +29,7 @@ class FileCreator(object):
         self._finalize = finalize(self, self.remove)
 
         with open(self._path, "wb") as fp:
-            fp.seek(size - 1)
+            fp.seek(size - 1)  # FIXME: fout.write(os.urandom(1024))
             fp.write(final_byte)
 
         assert os.path.getsize(self.path) == size

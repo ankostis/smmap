@@ -103,7 +103,7 @@ But it is safer to include their access within a ``with ...:`` blocks::
     ...     assert data[0] == 0
     ...     assert data[-1] == data[c.size - 1]
 
-    >>> assert c.closed     # Cursor closed automatically.
+    >>> assert c.closed         # Cursor closed automatically.
 
 Notice that you cannot interrogate the data from a "closed" cursor::
 
@@ -149,36 +149,30 @@ huge amounts of data.  Alternatively you can use the "sliding-buffer" convenienc
 
 Sliding cursors
 ---------------
-To facilitate usability at the expense of performance, the "sliding" implementation
-uses multiple regions underneath.
+To facilitate usability at the expense of performance, the *sliding-cursor*
+uses multiple regions internally.  That way you can access all data in a possibly huge file. 
+without having tediously acquire cursors to different regions.
 
-With it, you can access all data in a possibly huge file without having to set the cursor
-to different regions yourself::
+You need the *tiling-memmap-manager* for that to work::
 
-    >>> ## Create a default buffer which can operate on the whole file
-    >>> #  No need to wrap cursor in a with block of its own, buffer will clean it up.
+    >>> #  No need to wrap cursor in a with block.  But we can do it or the memmep-manger.
     >>> #
-    >>> buf = smmap.SlidingWindowCursor(mman, fc.path)
-    >>> assert buf.ofs == 0	         # from the start of the file
-    >>> assert buf.size == fc.size,	buf.size # till the end
-    >>> assert buf.cursor is None
+    >>> with smmap.TilingMemmapManager() as mman:
+    ...     c = mman.make_cursor(fc.path, sliding=True)
+    ...     assert not c.closed                     # Born open ...
+    ...     assert c.size == fc.size                # till the end of the file ...
+    >>> assert not c.closed                         # stays open...
+    >>> c.close()                                   # and ...
+    >>> assert not c.closed                         # never closes.
 
-So there is no cursor created internally yet; you need to enter the context-manager::
+    >>> with smmap.TilingMemmapManager() as mman:
+    ...     c = mman.make_cursor(fc.path, sliding=True)    # NOTE you must re-create the cursor for the new mmanager.
+    ...     assert c[0] == 0	                           # access the first byte
+    ...     assert c[-1] == ord(b'\xee')                   # access the last ten bytes on the file
+    ...     assert c[-5:] == b'\x00\x00\x00\x00\xee'       # access the last five bytes
 
-    >>> with buf:
-    ...     assert not buf.closed and buf.cursor and not buf.cursor.closed
-    ...     assert buf[0] == 0	                        # access the first byte
-    ...     assert buf[-1] == ord(b'\xee')                   # access the last ten bytes on the file
-    ...     assert buf[-5:] == b'\x00\x00\x00\x00\xee'  # access the last five bytes
 
-    >>> assert not buf.cursor
-
-So you cannot use the buffer anymore; but you can re-enter it::
-
-    >>> with buf:
-    ...     assert buf.cursor
-
-If you need different offsets/size/flags, then you have to create a new instance.
+If you need different initial offsets/size/flags, then you have to create a new instance.
 
 
 Disadvantages

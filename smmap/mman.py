@@ -1,4 +1,8 @@
-"""Module containing a memory memory manager which provides a sliding window on a number of memory mapped files."""
+"""
+Module containing a memory memory manager which provides a sliding window on a number of memory mapped files.
+
+.. default-role:: object
+"""
 from collections import namedtuple
 import logging
 import mmap
@@ -9,14 +13,16 @@ from future.utils import raise_from
 from smmap.util import string_types, Relation, PY3, finalize
 
 from .mwindow import (
-    FixedWindowCursor,
     MemmapRegion,
+    FixedWindowCursor,
+    SlidingWindowCursor,
 )
 from .util import (
     is_64_bit,
     suppress,
     ExitStack,
 )
+from contextlib import contextmanager
 
 
 __all__ = ['managed_mmaps', "MemmapManagerError",
@@ -190,7 +196,8 @@ class MemmapManager(object):
     #{ Configuration
     _MapWindowCls = _MapWindow
     MapRegionCls = MemmapRegion
-    WindowCursorCls = FixedWindowCursor
+    FixedCursorCls = FixedWindowCursor
+    SlidingCursorCls = SlidingWindowCursor
     #} END configuration
 
     def __init__(self, window_size=0, max_memory_size=0, max_open_handles=sys.maxsize):
@@ -442,6 +449,16 @@ class MemmapManager(object):
         self._ix_cur_reg.put(cursor, region)
         self._ix_reg_mmap.hit(region)  # maintain LRU
 
+    @contextmanager
+    def _cursor_bound(self, cursor, offset=0, size=0, flags=0):
+        """Used by the sliding-cursor* only - fixed cursors are bound on construction."""
+        region = self._obtain_region(cursor.finfo, offset, size, flags, False)
+        self._bind_cursor(cursor, region)
+
+        yield region
+
+        self._release_cursor(cursor)
+
     def _release_region(self, region):
         """Remove `region` from ``_ix_reg_mmap`` and ``_ix_path_finfo`` indexes only.
 
@@ -483,7 +500,7 @@ class MemmapManager(object):
             self._ix_path_finfo[path_or_fd] = finfo
         return finfo
 
-    def make_cursor(self, path_or_fd, offset=0, size=0, flags=0):
+    def make_cursor(self, path_or_fd, offset=0, size=0, flags=0, sliding=False):
         """Create a cursor to read/write using memory-mapped file
 
         .. Tip::
@@ -512,26 +529,55 @@ class MemmapManager(object):
         :param size:
             amount of bytes to map. If 0, all available bytes will be mapped
 
-            .. Note::
-                The actually size may be smaller than requested, either because
-                the file-size is smaller, or the map was created between two existing regions.
+        :param size:
+            the total size of the mapping requested. A non-positive means "as big possible".
+
+            The resulting cursor's size (``len()``) depends on the `sliding` argument:
+
+            - If ``sliding==False``, it may be smaller than requested, either because
+              the file-size was smaller, te *mman*'s :attr:`window_size` is smaller,
+              or because the map was created between two existing regions.
+
+            - If ``sliding==True``, will be the given size.
 
         :param flags:
             additional flags for ``os.open()`` in case there is no region open for this file.
             Has no effect in case an existing region gets reused.
-        :return:
-            a :class:`FixedWindowCursor` pointing to the given path or file descriptor,
-            or fails if offset was beyond the end of the file
-            """
-        finfo = self._get_or_create_finfo(path_or_fd)
-        region = self._obtain_region(finfo, offset, size, flags, False)
-        avail_size = min(finfo.file_size, region.ofs_end - offset)
-        if 0 < size < avail_size:
-            avail_size = size
-        cursor = self.WindowCursorCls(self, finfo, offset, avail_size)
 
-        ## Register here so cursor cannot not re-validate itself.
-        self._bind_cursor(cursor, region)
+        :return:
+            a *cursor* pointing to the given path or file descriptor, or fail
+            if offset was beyond the end of the file, or this manager  is the :class:`GreedyMemmapManager`
+            and the file is too big to fit into the memory.
+
+            If this manager is the :class:`TilingMemmapManager`, the actual class of the cursor
+            depends on the `sliding` argument:
+
+            - If ``sliding==False``, :class:`FixedWindowCursor`,
+            - If ``sliding==True``, :class:`SlidingWindowCursor`,
+
+        """
+        if offset < 0:
+            raise IndexError("Cursor offset must be non-negative: %s, %s, %s!", offset, size, path_or_fd)
+
+        finfo = self._get_or_create_finfo(path_or_fd)
+        fsize = finfo.file_size
+
+        if sliding:
+            if not isinstance(self, TilingMemmapManager):
+                raise ValueError("Only TILING-memap-managers can create SLIDING-cursors!")
+            if size <= 0:
+                size = fsize - offset
+            cursor = self.SlidingCursorCls(self, finfo, offset, size, flags)
+            ## No region binding, happens internally, on each method call of the cursor.
+
+        else:
+            region = self._obtain_region(finfo, offset, size, flags, False)
+            avail_size = min(fsize, region.ofs_end - offset)
+            if 0 < size < avail_size:
+                avail_size = size
+            cursor = self.FixedCursorCls(self, finfo, offset, avail_size)
+            ## Register here so cursor cannot not re-validate itself.
+            self._bind_cursor(cursor, region)
 
         return cursor
 
@@ -566,7 +612,8 @@ class MemmapManager(object):
     def num_open_files(self):
         """:return: the number of files that opens regions exist for
         """
-        return len(self._ix_path_finfo)
+        finfos = set(self._ix_path_finfo.values())
+        return sum(1 for r in self._ix_reg_mmap if r.finfo in finfos)
 
     @property
     def num_open_cursors(self):
