@@ -31,7 +31,7 @@ install:
         conda install --yes --quiet  pip
       )
     - pip install  nose wheel coveralls
-    - pip install -r requirements
+    - pip install -r requirements.txt
 
     ## For commits performed with the default user.
     - |
@@ -44,7 +44,7 @@ build: false
 
 test_script:
     -   IF "%PYTHON_VERSION%"=="3.5" (
-            nosetests -v --with-coverage
+            nosetests -vd --with-coverage
         ) ELSE (
-            nosetests -v
+            nosetests -vd
         )
