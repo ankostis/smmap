@@ -25,6 +25,7 @@ setup(
     platforms=["any"],
     license="BSD",
     packages=find_packages(),
+    install_requires=['future'],
     zip_safe=True,
     classifiers=[
         # Picked from

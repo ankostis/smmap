@@ -134,7 +134,7 @@ class TestMMan(TestBase):
                         os.close(fd)
         # END for each manasger type
 
-    @skipIf(not PY3, "missing `assertLogs()` ")
+    @skipIf(sys.version_info[:2] < (3, 4), "missing `assertLogs()` ")
     def test_mman_close_with_active_regions(self):
         with FileCreator(self.k_window_test_size, "manager_test") as fc:
             with TilingMemmapManager() as mman:
@@ -145,17 +145,36 @@ class TestMMan(TestBase):
                     assert any(" regs=(1, 1), curs=1) active handles" in l for l in logrec.output)
 
     @skipIf(not PY3, "mmap is not a buffer, so memoryview fails")
-    def test_mman_close_with_memoryviews(self):
-        with FileCreator(1024 * 1024 * 8) as fc:
-            with self.assertRaisesRegex(MemmapManagerError, "cannot close exported pointers exist"):
-                with TilingMemmapManager() as mman:
-                    c = mman.make_cursor(fc.path)
-                    memmap = mman._mmap_for_region(c.region)
-                    data = memoryview(memmap)
-                    assert data[0:5] == b'\x00\x00\x00\x00\x00'
-                assert data[3] == 0
-            data.release()
-            mman.close()
+    def test_mman_not_close_with_memoryviews(self):
+        with FileCreator(1024) as fc:
+            with FileCreator(8) as fc2:
+                with self.assertRaises(MemmapManagerError) as t:
+                    with TilingMemmapManager() as mman:
+                        c = mman.make_cursor(fc.path)
+                        memmap = mman._mmap_for_region(c.region)
+                        data = memoryview(memmap)
+
+                        assert data[0:5] == b'\x00\x00\x00\x00\x00'
+
+                        c2 = mman.make_cursor(fc.path, fc.size - 10)
+                        memmap = mman._mmap_for_region(c2.region)
+                        data2 = memoryview(memmap)
+
+                        c3 = mman.make_cursor(fc2.path)
+                        memmap = mman._mmap_for_region(c3.region)
+                        data3 = memoryview(memmap)
+
+                    assert data[3] == 0
+                ex_msg = str(t.exception)
+                print(ex_msg, file=sys.stderr)
+                assert "files=2, regs=(2, 2), curs=3) due to active handles and 2 closing-failures:" in ex_msg
+                assert "file_size=1024), 0, 1024): cannot close exported pointers exist" in ex_msg
+                assert "file_size=8), 0, 8): cannot close exported pointers exist" in ex_msg
+
+                data.release()
+                data2.release()
+                data3.release()
+                mman.close()
 
     def test_memman_operation(self):
         # test more access, force it to actually unmap regions

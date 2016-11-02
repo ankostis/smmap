@@ -5,6 +5,7 @@ import mmap
 import os
 import sys
 
+from future.utils import raise_from
 from smmap.util import string_types, Relation, PY3, finalize
 
 from .mwindow import (
@@ -233,10 +234,7 @@ class MemmapManager(object):
     #{ Internal Methods
 
     def _wrap_index_ex(self, rel, action, key, val, ex):
-        if PY3:
-            raise MemmapManagerError(self, *ex.args) from None
-        else:
-            raise MemmapManagerError(self, *ex.args)
+        raise_from(MemmapManagerError(self, *ex.args), None)
 
     def __repr__(self):
         if self.closed:
@@ -368,18 +366,18 @@ class MemmapManager(object):
                 errors.append('%s: %s' % (region, ex))
 
         if not errors:
-            ## If everything closed fine, shutdown "quickly"
+            ## If all mmaps closed fine, shutdown "quickly"
             #  marking this instances "closed".
             self._ix_reg_mmap = self._ix_path_finfo = self._ix_cur_reg = None
 
+            ## Report open cursors, but this is not deadly.
+            #
             if used_regions:
                 log.warning("Closed with %s active handles: %s", status_str, status_str)
         else:
+            # If mmaps were left open, do NOT close!
+            #  Remove only those that closed fine.
             #
-            # If resources were still open, do not shutdown!
-            #  Remove only those handles that were closed fine,
-            ## and report any errors encountered, before keeping this mman open.
-
             if closed_regions:
                 closed_regions = set(closed_regions)
                 for cursor in (c
@@ -396,15 +394,20 @@ class MemmapManager(object):
                     except MemmapManagerError as ex:
                         errors.append('%s: %s' % (region, ex))
 
-            if errors:
-                mmap_msg = "\n  Number of closing-failures: %s \n    %s" % (
-                    len(errors),
-                    '\n    %s '.join('%i. %s' % (i, e)
-                                     for i, e in enumerate(errors, 1)))
-            else:
-                mmap_msg = ''
+            ## Let's hope indexes are left in a good shape...
 
-            msg = "Failed closing %s due to active handles!%s" % (status_str, mmap_msg)
+            ## Scream the errors encountered.
+            #
+            error_msgs = '\n  '.join('%i. %s' % (i, '\n     '.join(e.split('\n')))  # indent error-bodies by 5
+                                     for i, e in enumerate(errors, 1))
+            msg = "Failed closing %s due to active handles and %s closing-failures:\n  %s" % (
+                status_str, len(errors), error_msgs)
+            #
+            # Result:
+            #    MemmapManagerError(TilingMemmapManager(...)):
+            #      Failed closing TilingMemmapManager(...) due to active handles and 2 closing-failures:
+            #        1. MemmapRegion(FileInfo(path_or_fd='\\0zthoux2', ...): cannot close exported pointers exist
+            ##       2. MemmapRegion(FileInfo(path_or_fd='\\k04hrtdj', ...): cannot close exported pointers exist
 
             raise MemmapManagerError(self, msg)
 
