@@ -140,8 +140,7 @@ class Relation(MutableMapping):
                  'inv',             #: For "1-1" mapping, this is a `dict()` populated with {values->key}.
                  'null_keys',       #: Whether to accept null-keys on insert.
                  'null_values',     #: Whether to accept null-values on insert.
-                 'on_put_error',    #: A `callable(registry, k, v)` to fix state on errors.
-                 'on_take_error',   #: A `callable(registry, k, (null)v)` to fix state on errors.
+                 'on_errors',    #: A `callable(registry, action, k, v, ex)` to handle errors.
                  'kname',           #: label printed in messages
                  'vname',           #: label printed in messages
                  '_rollback_copy',
@@ -156,14 +155,14 @@ class Relation(MutableMapping):
     def __init__(self, name='', one2one=False,
                  null_keys=False, null_values=False,
                  kname='KEY', vname='VALUE',
-                 on_put_error=None, on_take_error=None,
+                 on_errors=None,
                  dictfact=OrderedDict):
         self.rel = dictfact()
         if one2one:
             self.inv = type(self)(name, False,
                                   null_values, null_keys,
                                   vname, kname,
-                                  on_put_error, on_take_error,
+                                  on_errors,
                                   dictfact)
             self.inv.inv = self
         else:
@@ -171,8 +170,7 @@ class Relation(MutableMapping):
         self.name = name
         self.null_keys = null_keys
         self.null_values = null_values
-        self.on_put_error = on_put_error
-        self.on_take_error = on_take_error
+        self.on_errors = on_errors
         self.kname = kname
         self.vname = vname
 
@@ -225,7 +223,6 @@ class Relation(MutableMapping):
         rel = self.rel
         inverse = self.inv
 
-        ok = False
         try:
             if not self.null_keys and k is None:
                 raise KeyError(self._err_msg(action, "Null %s" % kname, k, v))
@@ -241,12 +238,11 @@ class Relation(MutableMapping):
                     raise KeyError(self._err_msg(action, "%s already invert-mapped to %s" % (vname, kk), k, v))
                 inverse[v] = k
             rel[k] = v
-
-            ok = True
-        finally:
-            if not ok and self.on_put_error:
-                with suppress(Exception):
-                    self.on_put_error(self, k, v)
+        except Exception as ex:
+            if self.on_errors:
+                self.on_errors(self, action, k, v, ex)
+            else:
+                raise
 
     def take(self, k):
         action = 'TAKE'
@@ -255,7 +251,6 @@ class Relation(MutableMapping):
         rel = self.rel
         inverse = self.inv
 
-        ok = False
         try:
             v = rel.get(k, Relation.MISSING)
             if v is Relation.MISSING:
@@ -270,12 +265,11 @@ class Relation(MutableMapping):
                                                  (kname, k, kk), k, v))
                 del inverse[v]
             del rel[k]
-
-            ok = True
-        finally:
-            if not ok and self.on_take_error:
-                with suppress(Exception):
-                    self.on_take_error(self, k, v)
+        except Exception as ex:
+            if self.on_errors:
+                self.on_errors(self, action, k, v, ex)
+            else:
+                raise
 
         return v
 
@@ -286,14 +280,21 @@ class Relation(MutableMapping):
 
     def hit(self, k):
         """Maintain LRU, by moving key to the end."""
+        action = 'TAKE'
         rel = self.rel
-        v = rel.get(k, Relation.MISSING)
-        if v is Relation.MISSING:
-            raise KeyError(self._err_msg('HIT', "Missing %s" % self.kname, k, v))
         try:
-            rel.move_to_end(k)
-        except AttributeError:
-            rel[k] = rel.pop(k)
+            v = rel.get(k, Relation.MISSING)
+            if v is Relation.MISSING:
+                raise KeyError(self._err_msg('HIT', "Missing %s" % self.kname, k, v))
+            try:
+                rel.move_to_end(k)
+            except AttributeError:
+                rel[k] = rel.pop(k)
+        except Exception as ex:
+            if self.on_errors:
+                self.on_errors(self, action, k, v, ex)
+            else:
+                raise
 
         ## TODO: Hit also inverse...
 

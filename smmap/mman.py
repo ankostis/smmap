@@ -151,6 +151,10 @@ class FileInfo(namedtuple('FileInfo', 'path_or_fd file_size')):
 _MB_in_bytes = 1024 * 1024
 
 
+class MemmapManagerError(Exception):
+    """Exceptions related to release of resources by memory-manager"""
+
+
 class MemmapManager(object):
 
     """
@@ -189,11 +193,13 @@ class MemmapManager(object):
             Otherwise the amount is only limited by the system itself. If a system or soft limit is hit,
             the manager will free as many handles as possible"""
         self._ix_path_finfo = Relation(kname='PATH_OR_FD', vname='RINFO',
-                                       one2one=1,)
-        self._ix_cur_reg = Relation(kname='CURSOR', vname='REGION')
+                                       one2one=1,
+                                       on_errors=self._wrap_index_ex)
+        self._ix_cur_reg = Relation(kname='CURSOR', vname='REGION',
+                                    on_errors=self._wrap_index_ex)
         self._ix_reg_mmap = Relation(kname='REGION', vname='MMAP',
                                      one2one=1,
-                                     on_put_error=lambda reg, memmap: memmap.close())
+                                     on_errors=self._wrap_index_ex)
         self.max_regions_count = max_open_handles
 
         if window_size < 0:
@@ -214,6 +220,9 @@ class MemmapManager(object):
         self._finalize = finalize(self, self.close)
 
     #{ Internal Methods
+
+    def _wrap_index_ex(self, rel, action, key, val, ex):
+        raise MemmapManagerError(*ex.args)
 
     def _make_region(self, finfo, ofs=0, size=0, flags=0):
         # type: (List[MapRegion], int, int, int, int) -> MapRegion

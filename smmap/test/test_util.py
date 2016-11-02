@@ -2,7 +2,7 @@ from smmap.test.lib import TestBase
 from smmap.util import Relation
 
 
-class TestUtils(TestBase):
+class TestRelation(TestBase):
 
     def test_Nto1(self):
         rg = Relation()
@@ -125,3 +125,16 @@ class TestUtils(TestBase):
         except:
             pass
         self.assertEqual(d, rg)
+
+    def test_on_error(self):
+        def wrap_ex(rel, action, key, val, ex):
+            raise ValueError(*ex.args)
+
+        rg = Relation(on_errors=wrap_ex)
+        assert rg.inv is None
+
+        rg.put(1, 2)
+
+        self.assertRaises(ValueError, rg.put, 1, 2)
+        self.assertRaises(ValueError, rg.take, 0)
+        self.assertRaises(ValueError, rg.hit, 's')
