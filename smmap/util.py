@@ -1,5 +1,5 @@
 """Generic and compatibility utilities."""
-from collections import OrderedDict
+from collections import OrderedDict, MutableMapping
 import itertools
 import logging
 import sys
@@ -76,7 +76,7 @@ class suppress:
         return supp
 
 
-class Relation(OrderedDict):
+class Relation(MutableMapping):
     """A single-threaded, integrity checked, transactional, "N-to-1" or "1-to-1"(invertible) mapping.
 
     The "1-1" flavor is invertible through the :attr:`inv` property.
@@ -131,9 +131,10 @@ class Relation(OrderedDict):
 
     """
     __slots__ = ('name',
-                 'null_keys',
-                 'null_values',
+                 'rel',
                  'inv',             #: For "1-1" mapping, this is a `dict()` populated with {values->key}.
+                 'null_keys',       #: Whether to accept null-keys on insert.
+                 'null_values',     #: Whether to accept null-values on insert.
                  'on_put_error',    #: A `callable(registry, k, v)` to fix state on errors.
                  'on_take_error',   #: A `callable(registry, k, (null)v)` to fix state on errors.
                  'kname',           #: label printed in messages
@@ -147,23 +148,12 @@ class Relation(OrderedDict):
 
     MISSING = _Missing()
 
-    def __enter__(self):
-        self._rollback_copy = (self.copy(), None if self.inv is None else self.inv.copy())
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        if exc_type:
-            me, inv = self._rollback_copy
-            self.clear()
-            self.update(me)
-            self.inv = inv
-        self._rollback_copy = None
-
     def __init__(self, name='', one2one=False,
                  null_keys=False, null_values=False,
                  kname='KEY', vname='VALUE',
                  on_put_error=None, on_take_error=None,
                  ):
+        self.rel = OrderedDict()
         if one2one:
             self.inv = type(self)(name, False,
                                   null_values, null_keys,
@@ -181,10 +171,53 @@ class Relation(OrderedDict):
         self.kname = kname
         self.vname = vname
 
+    def __enter__(self):
+        self._rollback_copy = (self.rel.copy(), None if self.inv is None else self.inv.copy())
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if exc_type:
+            self.rel, self.inv = self._rollback_copy
+        self._rollback_copy = None
+
+    def __getitem__(self, key):
+        return self.rel[key]
+
+    def __delitem__(self, key):
+        del self.rel[key]
+
+    def __setitem__(self, key, value):
+        self.rel[key] = value
+
+    def __iter__(self):
+        return iter(self.rel)
+
+    def __len__(self):
+        return len(self.rel)
+
+    def copy(self):
+        return self.rel.copy()
+
+    def clear(self):
+        return self.rel.clear()
+
+    def update(self, *args, **kwds):
+        return self.rel.update(*args, **kwds)
+
+    def items(self):
+        return self.rel.items()
+
+    def keys(self):
+        return self.rel.keys()
+
+    def values(self):
+        return self.rel.values()
+
     def put(self, k, v):
         action = 'PUT'
         kname = self.kname
         vname = self.vname
+        rel = self.rel
         inverse = self.inv
 
         ok = False
@@ -193,7 +226,7 @@ class Relation(OrderedDict):
                 raise KeyError(self._err_msg(action, "Null %s" % kname, k, v))
             if not self.null_values and v is None:
                 raise KeyError(self._err_msg(action, "Null %s" % vname, k, v))
-            vv = self.get(k, Relation.MISSING)
+            vv = rel.get(k, Relation.MISSING)
             if vv is not Relation.MISSING:
                 raise KeyError(self._err_msg(action, "%s already mapped to %s" % (kname, vv), k, v))
 
@@ -202,7 +235,7 @@ class Relation(OrderedDict):
                 if kk is not Relation.MISSING:
                     raise KeyError(self._err_msg(action, "%s already invert-mapped to %s" % (vname, kk), k, v))
                 inverse[v] = k
-            self[k] = v
+            rel[k] = v
 
             ok = True
         finally:
@@ -214,11 +247,12 @@ class Relation(OrderedDict):
         action = 'TAKE'
         kname = self.kname
         vname = self.vname
+        rel = self.rel
         inverse = self.inv
 
         ok = False
         try:
-            v = self.get(k, Relation.MISSING)
+            v = rel.get(k, Relation.MISSING)
             if v is Relation.MISSING:
                 raise KeyError(self._err_msg(action, "Missing %s" % kname, k, v))
 
@@ -230,7 +264,7 @@ class Relation(OrderedDict):
                     raise KeyError(self._err_msg(action, "Mismatch %s with inverted: %r <> %r" %
                                                  (kname, k, kk), k, v))
                 del inverse[v]
-            del self[k]
+            del rel[k]
 
             ok = True
         finally:
@@ -247,13 +281,14 @@ class Relation(OrderedDict):
 
     def hit(self, k):
         """Maintain LRU, by moving key to the end."""
-        v = self.get(k, Relation.MISSING)
+        rel = self.rel
+        v = rel.get(k, Relation.MISSING)
         if v is Relation.MISSING:
             raise KeyError(self._err_msg('HIT', "Missing %s" % self.kname, k, v))
         try:
-            self.move_to_end(k)
+            rel.move_to_end(k)
         except AttributeError:
-            self[k] = self.pop(k)
+            rel[k] = rel.pop(k)
 
         ## TODO: Hit also inverse...
 
