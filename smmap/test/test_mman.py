@@ -7,16 +7,24 @@ from time import time
 from unittest.case import skipIf
 
 from smmap.mman import (
+    align_to_mmap,
+    ALLOCATIONGRANULARITY,
     TilingMemmapManager,
     GreedyMemmapManager,
-    _MapWindow, FileInfo)
-from smmap.mman import align_to_mmap
-from smmap.util import PY3
+    _MapWindow,
+    FileInfo,
+)
+from smmap.util import PY3, is_64_bit
 
 from .lib import TestBase, FileCreator
 
 
 class TestMMan(TestBase):
+
+    def test_util(self):
+        assert isinstance(is_64_bit, bool)    # just call it
+        assert align_to_mmap(1, False) == 0
+        assert align_to_mmap(1, True) == ALLOCATIONGRANULARITY
 
     def test_MapWindow(self):
         wl = _MapWindow(0, 1)        # left

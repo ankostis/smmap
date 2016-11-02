@@ -14,7 +14,6 @@ logging.basicConfig(level=0)
 #{ Utilities
 
 
-
 class FileCreator(object):
 
     """A instance which creates a temporary file with a prefix and a given size

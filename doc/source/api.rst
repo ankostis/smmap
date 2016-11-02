@@ -19,16 +19,9 @@ Windows (Cursors & Regions)
    :members:
    :undoc-members:
 
-Buffers
-===========
-
-.. automodule:: smmap.buf
-   :members:
-   :undoc-members:
-
 
 Exceptions
-===========***
+===========
 
 .. automodule:: smmap.exc
    :members:
@@ -36,7 +29,7 @@ Exceptions
 
 
 Utilities
-===========**
+===========
 
 .. automodule:: smmap.util
    :members:

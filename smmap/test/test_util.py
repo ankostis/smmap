@@ -1,5 +1,5 @@
 from smmap.test.lib import TestBase
-from smmap.util import Relation, ExitStack
+from smmap.util import Relation
 
 
 class TestUtils(TestBase):
@@ -81,8 +81,6 @@ class TestUtils(TestBase):
         with rg:
             rg.put(1, 11)
             rg.put(2, 22)
-            d = rg.copy()
-
             d = rg.copy()
         self.assertEqual(d, rg)
 
