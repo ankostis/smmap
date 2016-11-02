@@ -18,7 +18,8 @@ from .util import (
 )
 
 
-__all__ = ['managed_mmaps', "GreedyMemmapManager", "TilingMemmapManager",
+__all__ = ['managed_mmaps', "MemmapManagerError",
+           "GreedyMemmapManager", "TilingMemmapManager",
            "ALLOCATIONGRANULARITY", "align_to_mmap"]
 
 log = logging.getLogger(__name__)
@@ -152,7 +153,11 @@ _MB_in_bytes = 1024 * 1024
 
 
 class MemmapManagerError(Exception):
-    """Exceptions related to release of resources by memory-manager"""
+    """
+    Exceptions related to release of resources by memory-manager
+
+    Always ``arg[0]`` is the *mem-manager*.
+    """
 
 
 class MemmapManager(object):
@@ -222,13 +227,16 @@ class MemmapManager(object):
     #{ Internal Methods
 
     def _wrap_index_ex(self, rel, action, key, val, ex):
-        raise MemmapManagerError(*ex.args)
+        raise MemmapManagerError(self, *ex.args)
 
     def __repr__(self):
-        return "%s(winize=%s, files=%s, regs=(%s, %s), curs=%s)" % (
-            type(self).__name__, self.window_size, self.num_open_files,
-            self.num_open_regions, self.num_used_regions,
-            self.num_open_cursors)
+        if self.closed:
+            return "%s(winize=%s, CLOSED)" % (type(self).__name__, self.window_size)
+        else:
+            return "%s(winize=%s, files=%s, regs=(%s, %s), curs=%s)" % (
+                type(self).__name__, self.window_size, self.num_open_files,
+                self.num_open_regions, self.num_used_regions,
+                self.num_open_cursors)
 
     def _make_region(self, finfo, ofs=0, size=0, flags=0):
         # type: (List[MemmapRegion], int, int, int, int) -> MemmapRegion
@@ -314,7 +322,10 @@ class MemmapManager(object):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        with suppress(Exception):
+        if exc_type:
+            with suppress(Exception):
+                self.close()
+        else:
             self.close()
 
     def close(self):
@@ -331,11 +342,11 @@ class MemmapManager(object):
         status_str = str(self)
         n_used_regions = self.num_used_regions
         mmap_errors = []
-        for memmap in self._ix_reg_mmap.values():
+        for region, memmap in self._ix_reg_mmap.items():
             try:
                 memmap.close()
             except Exception as ex:
-                mmap_errors.append(ex)
+                mmap_errors.append('%s: %s' % (region, ex))
 
         ## Mark this instances as "closed".
         self._ix_reg_mmap = self._ix_path_finfo = self._ix_cur_reg = None
@@ -344,14 +355,16 @@ class MemmapManager(object):
         #
         if n_used_regions or mmap_errors:
             if mmap_errors:
-                mmap_msg = "\n  MMap closing-failures: \n    %s" % (
-                    len(mmap_errors), '\n    '.join(str(e) for e in mmap_errors))
+                mmap_msg = "\n  Number of memmap closing-failures: %s \n    %s" % (
+                    len(mmap_errors),
+                    '\n    %s '.join('%i. %s' % (i, e)
+                                     for i, e in enumerate(mmap_errors, 1)))
             else:
                 mmap_msg = ''
 
-            msg = "Closed %s which had active handles!%s" % (status_str, mmap_msg)
+            msg = "Failed closing %s due to active handles!%s" % (status_str, mmap_msg)
 
-            raise ValueError(msg)
+            raise MemmapManagerError(self, msg)
 
     @property
     def closed(self):

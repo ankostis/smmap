@@ -12,6 +12,7 @@ from smmap.mman import (
     GreedyMemmapManager,
     _MapWindow,
     FileInfo,
+    MemmapManagerError,
 )
 from smmap.util import PY3, is_64_bit
 
@@ -139,7 +140,7 @@ class TestMMan(TestBase):
                 ## Check that `cursors.close()` without complaints if `mman` has closed prematurely
                 with mman.make_cursor(fc.path):
                     exmsg = r"files=1, regs=\(1, 1\), curs=1"
-                    self.assertRaisesRegex(ValueError, exmsg, mman.close)
+                    self.assertRaisesRegex(MemmapManagerError, exmsg, mman.close)
 
     def test_memman_operation(self):
         # test more access, force it to actually unmap regions
