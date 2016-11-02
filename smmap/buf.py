@@ -41,7 +41,7 @@ class SlidingWindowMapBuffer(_WindowHandle):
         :raise ValueError: if the buffer could not achieve a valid state"""
         self.flags = flags
         rlist = mman.get_or_create_rlist(path_or_fd)
-        avail_size = rlist.file_size() - offset
+        avail_size = rlist.file_size - offset
         if 0 < size < avail_size:
             avail_size = size
         super(SlidingWindowMapBuffer, self).__init__(mman, path_or_fd, offset, avail_size)
@@ -129,8 +129,12 @@ class SlidingWindowMapBuffer(_WindowHandle):
         destroys cursor, and should be called just in time to allow system
         resources to be freed.
         """
-        self._c.release()
-        self._c = None
+        ## TODO: Buf inherit cursor.
+        #  For now, have to break the "fail" rul becuase is not implemented
+        #          #  an a "one off" context-manager.
+        if self._c:
+            self._c.release()
+            self._c = None
 
     @property
     def cursor(self):

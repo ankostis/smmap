@@ -20,7 +20,7 @@ class TestMWindow(TestBase):
 
                 cv = mman.make_cursor(fc.path)
                 assert not cv.closed
-                assert cv.file_size() == fc.size
+                assert cv.file_size == fc.size
                 assert cv.path == fc.path
 
             # unuse non-existing region manually is fine
@@ -68,7 +68,7 @@ class TestMWindow(TestBase):
 
                     assert len(ml) == 0
                     assert ml.path_or_fd == item
-                    assert ml.file_size() == fc.size
+                    assert ml.file_size == fc.size
             finally:
                 os.close(fd)
 
@@ -78,11 +78,12 @@ class TestMWindow(TestBase):
         assert align_to_mmap(1, True) == ALLOCATIONGRANULARITY
 
     def test_cursor_hangs(self):
-        with FileCreator(1024*1024*8) as fc:
-            with SlidingWindowMapManager() as mman:
-                with mman.make_cursor(fc.path) as c:
-                    c2 = c
-                    data = memoryview(c2.map())
-                    assert data[0:5] == b'\x00\x00\x00\x00\x00', (data[:], data[0:5], b'\x00\x00\x00\x00\x00')
-        print(data[3])
-    #>>> with c.use_region(10, 5) as c2:
+        with FileCreator(1024 * 1024 * 8) as fc:
+            #with self.assertRaisesRegex(ValueError, "cannot close exported pointers exist"):
+                with SlidingWindowMapManager() as mman:
+                    with mman.make_cursor(fc.path) as c:
+                        data = memoryview(c.map())
+                        assert data[0:5] == b'\x00\x00\x00\x00\x00'
+                assert data[3] == 0
+            #data.release()
+            #mman.close()

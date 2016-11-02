@@ -15,7 +15,7 @@ class TestUtils(TestBase):
         self.assertRaises(KeyError, rg.put, 3, None)
 
         ## Deletions
-        assert rg.take(1) == (1, 2)
+        assert rg.take(1) == 2
         self.assertRaises(KeyError, rg.take, 5)
         self.assertRaises(KeyError, rg.take, 3)
 
@@ -33,11 +33,11 @@ class TestUtils(TestBase):
         self.assertRaises(KeyError, rg.put, 3, None)
 
         ## Deletions
-        assert rg.take(1) == (1, 2)
+        assert rg.take(1) == 2
         assert 1 not in rg
         assert 2 not in rg.inv
         self.assertRaises(KeyError, rg.take, 1)
-        assert rg.inv.take(11) == (11, 22)
+        assert rg.inv.take(11) == 22
         self.assertRaises(KeyError, rg.take, 3)
 
     def test_Nto1_null(self):
@@ -52,7 +52,7 @@ class TestUtils(TestBase):
         self.assertRaises(KeyError, rg.take, None)
 
         ## Deletions
-        assert rg.take(1) == (1, 2)
+        assert rg.take(1) == 2
         rg.take(3)
         self.assertRaises(KeyError, rg.take, 3)
         self.assertRaises(KeyError, rg.take, None)
@@ -70,7 +70,7 @@ class TestUtils(TestBase):
         ## Deletions
         rg.take(1)
         self.assertRaises(KeyError, rg.take, 2)
-        assert rg.take(3) == (3, None)
+        assert rg.take(3) == None
         self.assertRaises(KeyError, rg.take, 3)
         self.assertRaises(KeyError, rg.take, None)
 

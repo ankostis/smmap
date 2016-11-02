@@ -184,9 +184,10 @@ class WindowCursor(_WindowHandle):
         """:return: our mapped region, or None if cursor is closed """
         return self.mman.region_for_cursor(self)
 
+    @property
     def file_size(self):
         """:return: size of the underlying file"""
-        return self.rlist.file_size()
+        return self.rlist.file_size
 
 
 class MapRegion(_WindowHandle):

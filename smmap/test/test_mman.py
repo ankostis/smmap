@@ -75,7 +75,7 @@ class TestMMan(TestBase):
                 if isinstance(man, StaticWindowMapManager):
                     winsize_cmp_val = -1
                 # END handle window size
-                assert man.window_size() > winsize_cmp_val
+                assert man.window_size > winsize_cmp_val
                 assert man.mapped_memory_size == 0
                 assert man.max_memory_size > 0
 
@@ -143,7 +143,7 @@ class TestMMan(TestBase):
                             base_offset = 5000
                             # window size is 0 for static managers, hence size will be 0.
                             # We take that into consideration
-                            size = man.window_size() // 2
+                            size = man.window_size // 2
                             with c.make_cursor(base_offset, size) as c:
                                 rr = c.region
                                 assert len(rr.cursors()) == 1  # the manager and the cursor and us
@@ -155,9 +155,9 @@ class TestMMan(TestBase):
                                 # assert c.size == size        # the cursor may overallocate in its static version
                                 assert c.ofs == base_offset
                                 assert rr.ofs == 0        # it was aligned and expanded
-                                if man.window_size():
+                                if man.window_size:
                                     # but isn't larger than the max window (aligned)
-                                    assert rr.size == align_to_mmap(man.window_size(), True)
+                                    assert rr.size == align_to_mmap(man.window_size, True)
                                 else:
                                     assert rr.size == fc.size
                                 # END ignore static managers which dont use windows and are aligned to file boundaries
@@ -182,12 +182,12 @@ class TestMMan(TestBase):
                             overshoot = 4000
                             base_offset = fc.size - (size or c.size) + overshoot
                             with c.make_cursor(base_offset, size) as c:
-                                if man.window_size():
+                                if man.window_size:
                                     assert man.num_open_regions == 2
                                     assert c.size < size
                                     assert c.region is not rr  # old region is still available,
                                     # but has not curser ref anymore
-                                    assert len(rr.cursors()) == 1  # only held by manager
+                                    assert len(rr.cursors()) == 0
                                 else:
                                     assert c.size < fc.size
                                 # END ignore static managers which only have one handle per file
@@ -198,7 +198,7 @@ class TestMMan(TestBase):
                                 assert c.buffer()[:] == data[base_offset:base_offset + (size or c.size)]
 
                             assert c.closed
-                            if man.window_size():
+                            if man.window_size:
                                 # but doesn't change anything regarding the handle count - we cache it and only
                                 # remove mapped regions if we have to
                                 assert man.num_open_regions == 2
@@ -212,16 +212,15 @@ class TestMMan(TestBase):
                             st = time()
 
                             max_memory_size = man.max_memory_size
-                            max_file_handles = man.max_file_handles()
                             while num_random_accesses:
                                 num_random_accesses -= 1
                                 base_offset = randint(0, fc.size - 1)
 
                                 # precondition
-                                if man.window_size():
+                                if man.window_size:
                                     assert max_memory_size >= man.mapped_memory_size
                                 # END statics will overshoot, which is fine
-                                assert max_file_handles >= man.num_open_regions
+                                assert man.max_regions_count >= man.num_open_regions
                                 with c.make_cursor(base_offset, (size or c.size)) as c:
                                     csize = c.size
                                     assert c.buffer()[:] == data[base_offset:base_offset + csize]

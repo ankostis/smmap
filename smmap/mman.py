@@ -132,6 +132,7 @@ class _RegionList(list):
     def __hash__(self):
         return id(self)
 
+    @property
     def file_size(self):
         """:return: size of file we manager"""
         if self._file_size is None:
@@ -160,9 +161,9 @@ class MemmapManager(object):
         '_ix_reg_mmap',         # 1-1 registry of {region <-> mmap} (LRU!)
         '_ix_cur_reg',          # N-1 registry of {cursor --> region}
         '_ix_path_rlist',       # 1-1 registry of {path   <-> rlist[regions]}  # TODO: replace with rlist on handles.
-        '_window_size',         # maximum size of a window
+        'window_size',         # maximum size of a window
         'max_memory_size',      # maximum amount of memory we may allocate
-        'max_handle_count',     # maximum amount of handles to keep open
+        'max_regions_count',     # maximum amount of handles to keep open
         '_finalize',            # To replace __del_
         '__weakref__',          # To replace __del_
     )
@@ -191,7 +192,7 @@ class MemmapManager(object):
         self._ix_reg_mmap = Relation(kname='REGION', vname='MMAP',
                                      one2one=1,
                                      on_put_error=lambda reg, memmap: memmap.close())
-        self.max_handle_count = max_open_handles
+        self.max_regions_count = max_open_handles
 
         if window_size < 0:
             coeff = 64
@@ -199,7 +200,7 @@ class MemmapManager(object):
                 coeff = 1024
             # END handle arch
             window_size = coeff * _MB_in_bytes
-        self._window_size = window_size
+        self.window_size = window_size
 
         if max_memory_size == 0:
             coeff = 1024
@@ -286,7 +287,7 @@ class MemmapManager(object):
         for rlist, region in region_pairs:
             assert self.mapped_memory_size >= 0, self.mapped_memory_size
 
-            if self.mapped_memory_size < mem_limit and self.num_open_regions < self.max_handle_count:
+            if self.mapped_memory_size < mem_limit and self.num_open_regions < self.max_regions_count:
                 break
 
             self._release_region(region)
@@ -313,7 +314,8 @@ class MemmapManager(object):
             Not to fail on *Windows*, all files referencing mmaps must have been closed.
             If used as a context manager, any errors are suppressed.
         """
-
+        if self.closed:
+            return
         n_cursors = self.num_open_cursors
         n_active_regions = self.num_open_regions
         mmap_errors = []
@@ -358,13 +360,13 @@ class MemmapManager(object):
         return tuple(c for c, r in self._ix_cur_reg.items() if r is region)
 
     def is_region_closed(self, region):
-        return region in self._ix_reg_mmap
+        return region not in self._ix_reg_mmap
 
     def is_region_used(self, region):
         return region in set(self._ix_cur_reg.values())
 
     def is_cursor_closed(self, cursor):
-        return cursor in self._ix_cur_reg
+        return cursor not in self._ix_cur_reg
 
     def _bind_cursor(self, cursor, region):
         """fails if indexes not in perfect shape (double registrations, etc)"""
@@ -382,7 +384,7 @@ class MemmapManager(object):
             _ix_path_rlist = exs.enter_context(self._ix_path_rlist)
             _ix_reg_mmap = exs.enter_context(self._ix_reg_mmap)
 
-            _, memmap = self._ix_reg_mmap.take(region)
+            memmap = self._ix_reg_mmap.take(region)
             rlist = _ix_path_rlist[path_or_fd]
             if len(rlist) == 1:
                 assert region in rlist, (region, rlist)
@@ -452,18 +454,9 @@ class MemmapManager(object):
             a :class:`WindowCursor` pointing to the given path or file descriptor,
             or fails if offset was beyond the end of the file
             """
-        rlist = self.get_or_create_rlist(path_or_fd)
+        region = self._obtain_region(path_or_fd, offset, size, flags, False)
 
-        fsize = rlist.file_size()
-        size = min(size or fsize, self._window_size or fsize)   # clamp size to window size
-
-        if offset >= fsize:
-            raise ValueError("Offset(%s) beyond file-size(%s) for file: %r"
-                             % (offset, fsize, path_or_fd))
-
-        region = self._obtain_region(rlist, offset, size, flags, False)
-
-        size = min(size, region.ofs_end - offset)
+        size = min(size or region.rlist.file_size, region.ofs_end - offset)
         cursor = self.WindowCursorCls(self, path_or_fd, offset, size)
 
         ## Register here so cursor cannot not re-validate itself.
@@ -508,13 +501,6 @@ class MemmapManager(object):
     def num_open_cursors(self):
         return len(self._ix_cur_reg)
 
-    def window_size(self):
-        """:return: size of each window when allocating new regions"""
-        return self._window_size
-
-    def max_file_handles(self):
-        """:return: maximium amount of handles we may have opened"""
-        return self.max_handle_count
 
     #} END interface
 
@@ -557,23 +543,30 @@ class StaticWindowMapManager(MemmapManager):
     through a StaticWindowMapManager, as they otherwise have to deal with their window size.
     These clients would have to use a SlidingWindowMapBuffer to hide this fact.
     """
-    def _obtain_region(self, rlist, offset, size, flags, is_recursive):
+    def _obtain_region(self, path_or_fd, offset, size, flags, is_recursive):
         """Create rlist new region without registering it.
 
         For more information on the parameters, see :meth:`make_cursor()`.
 
-        :param rlist: A regions (rlist)rray
-        :return: The newly created region"""
-        if (self.mapped_memory_size + size > self.max_memory_size or
-                self.num_open_regions >= self.max_handle_count):
-            self._purge_lru_regions(size)
-        # END handle collection
+        :return: The newly created region
+        """
+        rlist = self.get_or_create_rlist(path_or_fd)
+        fsize = rlist.file_size
+        if offset >= fsize:
+            raise ValueError("Offset(%s) beyond file-size(%s) for file: %r"
+                             % (offset, fsize, path_or_fd))
 
-        r = None
         if rlist:
             assert len(rlist) == 1
             r = rlist[0]
         else:
+            size = min(size or fsize, self.window_size or fsize)   # clamp size to file-size
+
+            if (self.mapped_memory_size + size > self.max_memory_size or
+                    self.num_open_regions >= self.max_regions_count):
+                self._purge_lru_regions(size)
+                is_recursive = True  # Don't recurse below, just cleaned all there is.
+
             try:
                 r = self._make_region(rlist, -1, 0, sys.maxsize, flags)
             except Exception:
@@ -585,8 +578,6 @@ class StaticWindowMapManager(MemmapManager):
                     raise
                 self._purge_lru_regions(0)
                 r = self._obtain_region(rlist, offset, size, flags, True)
-            # END handle exceptions
-        # END handle array
 
         assert r.includes_ofs(offset)
         return r
@@ -613,9 +604,15 @@ class SlidingWindowMapManager(MemmapManager):
         """Adjusts the default window size to -1"""
         super(SlidingWindowMapManager, self).__init__(window_size, max_memory_size, max_open_handles)
 
-    def _obtain_region(self, rlist, offset, size, flags, is_recursive):
+    def _obtain_region(self, path_or_fd, offset, size, flags, is_recursive):
         # bisect to find an existing region. The c++ implementation cannot
         # do that as it uses rlist linked list for regions.
+        rlist = self.get_or_create_rlist(path_or_fd)
+        fsize = rlist.file_size
+        if offset >= fsize:
+            raise ValueError("Offset(%s) beyond file-size(%s) for file: %r"
+                             % (offset, fsize, path_or_fd))
+
         r = None
         lo = 0
         hi = len(rlist)
@@ -634,18 +631,19 @@ class SlidingWindowMapManager(MemmapManager):
         # END while bisecting
 
         if r is None:
-            window_size = self._window_size
+            window_size = self.window_size
+            size = min(size or fsize, self.window_size or fsize)   # clamp size to window size
+
+            ## We honor max memory size, and assure we have enough memory available.
+            #
+            if (self.mapped_memory_size + size > self.max_memory_size or
+                    self.num_open_regions >= self.max_regions_count):
+                self._purge_lru_regions(window_size)
+                is_recursive = True  # Don't recurse below, just cleaned all there is.
+
             left = self._MapWindowCls(0, 0)
             mid = self._MapWindowCls(offset, size)
-            right = self._MapWindowCls(rlist.file_size(), 0)
-
-            # we want to honor the max memory size, and assure we have anough
-            # memory available
-            # Save calls !
-            if (self.mapped_memory_size + window_size > self.max_memory_size or
-                    self.num_open_regions >= self.max_handle_count):
-                self._purge_lru_regions(window_size)
-            # END handle collection
+            right = self._MapWindowCls(rlist.file_size, 0)
 
             # we assume the list remains sorted by offset
             insert_pos = 0

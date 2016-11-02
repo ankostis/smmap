@@ -238,7 +238,7 @@ class Relation(OrderedDict):
                 with suppress(Exception):
                     self.on_take_error(self, k, v)
 
-        return (k, v)
+        return v
 
     def _err_msg(self, action, msg, k, v):
         link = '-->' if self.inv is None else '<->'

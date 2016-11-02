@@ -83,6 +83,7 @@ Let's make a sample file full of zeros (remember to delete it later with ``del f
 
 and asked as much data as possible starting, from offset 0::
 
+    >>> mman = smmap.SlidingWindowMapManager()      # Remember to close it
     >>> c = mman.make_cursor(fc.path)
     >>> assert c.ofs == 0
     >>> assert c.size == fc.size
