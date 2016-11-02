@@ -1,5 +1,5 @@
 """Generic and compatibility utilities."""
-from collections import OrderedDict, MutableMapping
+from collections import MutableMapping
 import itertools
 import logging
 import sys
@@ -9,6 +9,11 @@ try:
     from contextlib import ExitStack
 except ImportError:
     from contextlib2 import ExitStack  # @UnusedImport
+
+try:
+    from collections import OrderedDict
+except ImportError:
+    from ordereddict import OrderedDict  # @UnusedImport PY26-
 
 __all__ = ["PY3", "is_64_bit", "buffer", 'suppress', 'string_types']
 
@@ -152,14 +157,14 @@ class Relation(MutableMapping):
                  null_keys=False, null_values=False,
                  kname='KEY', vname='VALUE',
                  on_put_error=None, on_take_error=None,
-                 ):
-        self.rel = OrderedDict()
+                 dictfact=OrderedDict):
+        self.rel = dictfact()
         if one2one:
             self.inv = type(self)(name, False,
                                   null_values, null_keys,
                                   vname, kname,
                                   on_put_error, on_take_error,
-                                  )
+                                  dictfact)
             self.inv.inv = self
         else:
             self.inv = None

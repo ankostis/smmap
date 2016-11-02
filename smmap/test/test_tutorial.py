@@ -5,10 +5,6 @@ import sys
 import unittest
 
 import os.path as osp
-try:
-    from unittest.mock import patch
-except ImportError:
-    from mock import patch  # @UnusedImport
 
 
 mydir = osp.dirname(__file__)

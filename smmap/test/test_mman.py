@@ -14,7 +14,6 @@ from smmap.mman import align_to_mmap
 from smmap.util import PY3
 
 from .lib import TestBase, FileCreator
-from smmap.buf import SlidingWindowMapBuffer
 
 
 class TestMMan(TestBase):

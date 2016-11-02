@@ -1,5 +1,4 @@
 """Module containing a memory memory manager which provides a sliding window on a number of memory mapped files."""
-from collections import OrderedDict
 import logging
 import os
 import mmap
@@ -187,7 +186,7 @@ class MemmapManager(object):
             Otherwise the amount is only limited by the system itself. If a system or soft limit is hit,
             the manager will free as many handles as possible"""
         self._ix_path_rlist = Relation(kname='PATH_OR_FD', vname='RLIST',
-                                       one2one=1, )
+                                       one2one=1,)
         self._ix_cur_reg = Relation(kname='CURSOR', vname='REGION')
         self._ix_reg_mmap = Relation(kname='REGION', vname='MMAP',
                                      one2one=1,
@@ -500,7 +499,6 @@ class MemmapManager(object):
     @property
     def num_open_cursors(self):
         return len(self._ix_cur_reg)
-
 
     #} END interface
 
