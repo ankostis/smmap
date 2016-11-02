@@ -32,22 +32,22 @@ class _WindowHandle(object):
 
     __slots__ = (
         'mman',         # the manger keeping all file regions
-        'path_or_fd',   # the file we are acting upon
+        'finfo',   # the file we are acting upon
         'ofs',          # the absolute offset from the actually mapped area to our start area
         'size',         # maximum size we should provide
         '_finalize',    # To replace __del_
         '__weakref__',  # To replace __del_
     )
 
-    def __init__(self, mman, path_or_fd, ofs=0, size=0):
+    def __init__(self, mman, finfo, ofs=0, size=0):
         self.mman = mman
-        self.path_or_fd = path_or_fd
+        self.finfo = finfo
         self.ofs = ofs
         self.size = size
         self._finalize = finalize(self, self.release)
 
     def __repr__(self):
-        return "%s(%s, %i, %i)" % (type(self).__name__, self.path_or_fd, self.ofs, self.size)
+        return "%s(%s, %i, %i)" % (type(self).__name__, self.finfo, self.ofs, self.size)
 
     def __hash__(self):
         return id(self)
@@ -74,11 +74,15 @@ class _WindowHandle(object):
             self.release()
 
     @property
+    def path_or_fd(self):
+        return self.finfo.path_or_fd
+
+    @property
     def path(self):
         """:return: path of the underlying mapped file
 
         :raise AssertionError: if attached path is not a path"""
-        pathfd = self.path_or_fd
+        pathfd = self.finfo.path_or_fd
         assert not isinstance(pathfd, int), (
             "Path queried on %s although cursor created with a file descriptor(%s)!"
             "\n  Use `fd` or `path_or_fd` properties instead." % (self, pathfd))
@@ -90,21 +94,20 @@ class _WindowHandle(object):
         """:return: file descriptor used to create the underlying mapping.
 
         :raise AssertionError: if the mapping was not created by a file descriptor"""
-        pathfd = self.path_or_fd
+        pathfd = self.finfo.path_or_fd
         assert isinstance(pathfd, int), (
             "File-descriptor queried on %s although cursor created with a path(%s)!"
             "\n  Use `path` or `path_or_fd` properties instead." % (self, pathfd))
 
     @property
-    def rlist(self):
-        """:return: our mapped region, or None if nothing is mapped yet
-        :raise AssertionError: if we have no current region"""
-        return self.mman.rlist_for_path_or_fd(self.path_or_fd)
-
-    @property
     def ofs_end(self):
         """:return: Absolute offset to one byte beyond the mapping into the file"""
         return self.ofs + self.size
+
+    @property
+    def file_size(self):
+        """:return: size of the underlying file"""
+        return self.finfo.file_size
 
     def includes_ofs(self, ofs):
         """:return: True if the given offset can be read in our mapped region"""
@@ -183,11 +186,6 @@ class WindowCursor(_WindowHandle):
     def region(self):
         """:return: our mapped region, or None if cursor is closed """
         return self.mman.region_for_cursor(self)
-
-    @property
-    def file_size(self):
-        """:return: size of the underlying file"""
-        return self.rlist.file_size
 
 
 class MapRegion(_WindowHandle):

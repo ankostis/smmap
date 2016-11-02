@@ -9,7 +9,7 @@ from unittest.case import skipIf
 from smmap.mman import (
     SlidingWindowMapManager,
     StaticWindowMapManager,
-    _MapWindow)
+    _MapWindow, FileInfo)
 from smmap.mman import align_to_mmap
 from smmap.util import PY3
 
@@ -18,7 +18,7 @@ from .lib import TestBase, FileCreator
 
 class TestMMan(TestBase):
 
-    def test_window(self):
+    def test_MapWindow(self):
         wl = _MapWindow(0, 1)        # left
         wc = _MapWindow(1, 1)        # center
         wc2 = _MapWindow(10, 5)      # another center
@@ -61,6 +61,17 @@ class TestMMan(TestBase):
 
         wc.align()
         assert wc.ofs == 0 and wc.size == align_to_mmap(wc.size, True)
+
+    def test_FileInfo(self):
+        with FileCreator(100, "sample_file") as fc:
+            fd = os.open(fc.path, os.O_RDONLY)
+            try:
+                for item in (fc.path, fd):
+                    ml = FileInfo(item)
+                    assert ml.path_or_fd == item
+                    assert ml.file_size == fc.size
+            finally:
+                os.close(fd)
 
     def test_memory_manager(self):
         slide_man = SlidingWindowMapManager()

@@ -28,6 +28,7 @@ class SlidingWindowMapBuffer(_WindowHandle):
     )
 
     def __init__(self, mman, path_or_fd, offset=0, size=0, flags=0):
+        # TODO: create sliding-buf from mman
         """Initalize the instance to operate on the given cursor.
 
         :param cursor: the cursor to the file you want to access
@@ -40,11 +41,11 @@ class SlidingWindowMapBuffer(_WindowHandle):
         :param flags: Additional flags to be passed to os.open
         :raise ValueError: if the buffer could not achieve a valid state"""
         self.flags = flags
-        rlist = mman.get_or_create_rlist(path_or_fd)
-        avail_size = rlist.file_size - offset
+        finfo = mman._get_or_create_finfo(path_or_fd)
+        avail_size = finfo.file_size - offset
         if 0 < size < avail_size:
             avail_size = size
-        super(SlidingWindowMapBuffer, self).__init__(mman, path_or_fd, offset, avail_size)
+        super(SlidingWindowMapBuffer, self).__init__(mman, finfo, offset, avail_size)
         self._c = None
 
     def __enter__(self):
