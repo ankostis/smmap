@@ -12,12 +12,12 @@ import logging
 from smmap.util import buffer, finalize
 
 
-__all__ = ["WindowCursor", "MapRegion"]
+__all__ = ["FixedWindowCursor", "MapRegion"]
 
 log = logging.getLogger(__name__)
 
 
-class _WindowHandle(object):
+class WindowHandle(object):
     """
     Abstract non-re-entrant no-reusable context-manager for a mman-managed memory window into a file.
 
@@ -114,7 +114,7 @@ class _WindowHandle(object):
         return self.ofs <= ofs < self.ofs + self.size
 
 
-class WindowCursor(_WindowHandle):
+class FixedWindowCursor(WindowHandle):
 
     """
     Pointer into the mapped region of the memory manager, keeping the map
@@ -122,7 +122,7 @@ class WindowCursor(_WindowHandle):
 
     .. Tip::
         Cursors should not be created manually, but though returned by
-        :meth:`StaticWindowMapManager.make_cursor()` or :meth:`SlidingWindowMapManager.make_cursor()`.
+        :meth:`GreedyMemmapManager.make_cursor()` or :meth:`TilingMemmapManager.make_cursor()`.
 
         It is recommended to close a cursor once you are done reading/writing,
         to help its referred region to get collected sooner.
@@ -138,7 +138,7 @@ class WindowCursor(_WindowHandle):
     def make_cursor(self, offset=None, size=None, flags=None):
         """:return: a new cursor for the new offset/size/flags.
 
-        For the params see :meth:`StaticWindowMapManager.make_cursor()`.
+        For the params see :meth:`GreedyMemmapManager.make_cursor()`.
         """
         kwds = dict((k, v) for k, v in locals().items() if v is not None)
         kwds.pop('self')
@@ -153,7 +153,7 @@ class WindowCursor(_WindowHandle):
         :return:
             a new cursor for the new offset/size/flags.
 
-        For the params see also :meth:`StaticWindowMapManager.make_cursor()`.
+        For the params see also :meth:`GreedyMemmapManager.make_cursor()`.
         """
         if offset is None:
             offset = self.ofs + self.size
@@ -179,7 +179,7 @@ class WindowCursor(_WindowHandle):
         """
         :return: the underlying raw memory map. Please not that the offset and size is likely to be different
             to what you set as offset and size. Use it only if you are sure about the region it maps, which is the whole
-            file in case of StaticWindowMapManager"""
+            file in case of GreedyMemmapManager"""
         return self.region.buffer()
 
     @property
@@ -188,7 +188,7 @@ class WindowCursor(_WindowHandle):
         return self.mman.region_for_cursor(self)
 
 
-class MapRegion(_WindowHandle):
+class MapRegion(WindowHandle):
 
     """Defines a mapped region of memory, aligned to pagesizes
 

@@ -8,7 +8,7 @@ import sys
 from smmap.util import string_types, Relation, PY3, finalize
 
 from .mwindow import (
-    WindowCursor,
+    FixedWindowCursor,
     MapRegion,
 )
 from .util import (
@@ -18,7 +18,7 @@ from .util import (
 )
 
 
-__all__ = ['managed_mmaps', "StaticWindowMapManager", "SlidingWindowMapManager",
+__all__ = ['managed_mmaps', "GreedyMemmapManager", "TilingMemmapManager",
            "ALLOCATIONGRANULARITY", "align_to_mmap"]
 
 log = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ def managed_mmaps(window_size, max_memory_size, max_open_handles):
     """Makes a memory-map context-manager instance for the correct python-version.
 
     :return:
-        either :class:`SlidingWindowMapManager` or :class:`StaticWindowMapManager` (if PY2).
+        either :class:`TilingMemmapManager` or :class:`GreedyMemmapManager` (if PY2).
 
         If you want to change other default parameters of these classes, use them directly.
 
@@ -48,7 +48,7 @@ def managed_mmaps(window_size, max_memory_size, max_open_handles):
 
             You may use :class:`contextlib.ExitStack()` to store them for longer-term lifetime.
     """
-    mman = SlidingWindowMapManager if PY3 else StaticWindowMapManager
+    mman = TilingMemmapManager if PY3 else GreedyMemmapManager
 
     return mman(**locals())
 
@@ -174,7 +174,7 @@ class MemmapManager(object):
     #{ Configuration
     _MapWindowCls = _MapWindow
     MapRegionCls = MapRegion
-    WindowCursorCls = WindowCursor
+    WindowCursorCls = FixedWindowCursor
     #} END configuration
 
     def __init__(self, window_size=0, max_memory_size=0, max_open_handles=sys.maxsize):
@@ -442,7 +442,7 @@ class MemmapManager(object):
             additional flags for ``os.open()`` in case there is no region open for this file.
             Has no effect in case an existing region gets reused.
         :return:
-            a :class:`WindowCursor` pointing to the given path or file descriptor,
+            a :class:`FixedWindowCursor` pointing to the given path or file descriptor,
             or fails if offset was beyond the end of the file
             """
         finfo = self._get_or_create_finfo(path_or_fd)
@@ -524,13 +524,13 @@ class MemmapManager(object):
     #} END special purpose interface
 
 
-class StaticWindowMapManager(MemmapManager):
+class GreedyMemmapManager(MemmapManager):
     """
     A manager producing cursors that always map the whole file.
 
     Clients must be written to specifically know that they are accessing their data
-    through a StaticWindowMapManager, as they otherwise have to deal with their window size.
-    These clients would have to use a SlidingWindowMapBuffer to hide this fact.
+    through a GreedyMemmapManager, as they otherwise have to deal with their window size.
+    These clients would have to use a SlidingWindowCursor to hide this fact.
     """
     def _obtain_region(self, finfo, offset, size, flags, is_recursive):
         """Create new region without registering it.
@@ -572,7 +572,7 @@ class StaticWindowMapManager(MemmapManager):
         return r
 
 
-class SlidingWindowMapManager(MemmapManager):
+class TilingMemmapManager(MemmapManager):
 
     """Maintains a list of ranges of mapped memory regions in one or more files and allows to easily
     obtain additional regions assuring there is no overlap.
@@ -591,7 +591,7 @@ class SlidingWindowMapManager(MemmapManager):
 
     def __init__(self, window_size=-1, max_memory_size=0, max_open_handles=sys.maxsize):
         """Adjusts the default window size to -1"""
-        super(SlidingWindowMapManager, self).__init__(window_size, max_memory_size, max_open_handles)
+        super(TilingMemmapManager, self).__init__(window_size, max_memory_size, max_open_handles)
 
     def _obtain_region(self, finfo, offset, size, flags, is_recursive):
         ## Bisect to find an existing region.

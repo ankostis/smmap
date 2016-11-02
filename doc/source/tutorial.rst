@@ -37,7 +37,7 @@ The *tiling* memory manager therefore should be the default manager when prepari
 for handling huge amounts of data on both 32bit and 64bit systems::
 
     >>> import smmap
-    >>> mman = smmap.SlidingWindowMapManager()
+    >>> mman = smmap.TilingMemmapManager()
 
 The manager provides much useful information about its current state
 like the amount of open file handles or the amount of mapped memory::
@@ -83,7 +83,7 @@ Let's make a sample file full of zeros (remember to delete it later with ``del f
 
 and asked as much data as possible starting, from offset 0::
 
-    >>> mman = smmap.SlidingWindowMapManager()      # Remember to close it
+    >>> mman = smmap.TilingMemmapManager()      # Remember to close it
     >>> c = mman.make_cursor(fc.path)
     >>> assert c.ofs == 0
     >>> assert c.size == fc.size
@@ -158,7 +158,7 @@ to different regions yourself::
     >>> ## Create a default buffer which can operate on the whole file
     >>> #  No need to wrap cursor in a with block of its own, buffer will clean it up.
     >>> #
-    >>> buf = smmap.SlidingWindowMapBuffer(mman, fc.path)
+    >>> buf = smmap.SlidingWindowCursor(mman, fc.path)
     >>> assert buf.ofs == 0	         # from the start of the file
     >>> assert buf.size == fc.size,	buf.size # till the end
     >>> assert buf.cursor is None

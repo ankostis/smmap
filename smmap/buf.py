@@ -2,7 +2,7 @@
 import sys
 from smmap.mwindow import _WindowHandle
 
-__all__ = ["SlidingWindowMapBuffer"]
+__all__ = ["SlidingWindowCursor"]
 
 
 try:
@@ -11,7 +11,7 @@ except NameError:
     bytes = str  # @ReservedAssignment
 
 
-class SlidingWindowMapBuffer(_WindowHandle):
+class SlidingWindowCursor(_WindowHandle):
 
     """A buffer like object which allows direct byte-wise object and slicing into
     memory of a mapped file. The mapping is controlled by the slicing
@@ -45,7 +45,7 @@ class SlidingWindowMapBuffer(_WindowHandle):
         avail_size = finfo.file_size - offset
         if 0 < size < avail_size:
             avail_size = size
-        super(SlidingWindowMapBuffer, self).__init__(mman, finfo, offset, avail_size)
+        super(SlidingWindowCursor, self).__init__(mman, finfo, offset, avail_size)
         self._c = None
 
     def __enter__(self):

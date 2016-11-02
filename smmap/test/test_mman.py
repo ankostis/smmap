@@ -7,8 +7,8 @@ from time import time
 from unittest.case import skipIf
 
 from smmap.mman import (
-    SlidingWindowMapManager,
-    StaticWindowMapManager,
+    TilingMemmapManager,
+    GreedyMemmapManager,
     _MapWindow, FileInfo)
 from smmap.mman import align_to_mmap
 from smmap.util import PY3
@@ -74,15 +74,15 @@ class TestMMan(TestBase):
                 os.close(fd)
 
     def test_memory_manager(self):
-        slide_man = SlidingWindowMapManager()
-        static_man = StaticWindowMapManager()
+        slide_man = TilingMemmapManager()
+        static_man = GreedyMemmapManager()
 
         for man in (static_man, slide_man):
             with man:
                 assert man.num_open_regions == 0
                 assert man.num_open_cursors == 0
                 winsize_cmp_val = 0
-                if isinstance(man, StaticWindowMapManager):
+                if isinstance(man, GreedyMemmapManager):
                     winsize_cmp_val = -1
                 # END handle window size
                 assert man.window_size > winsize_cmp_val
@@ -122,7 +122,7 @@ class TestMMan(TestBase):
     @skipIf(not PY3, "missing `assertRaisesRegex()` ")
     def test_memory_manager_close_with_active_regions(self):
         with FileCreator(self.k_window_test_size, "manager_test") as fc:
-            with SlidingWindowMapManager() as mman:
+            with TilingMemmapManager() as mman:
                 ## Check that `cursors.close()` without complaints if `mman` has closed prematurely
                 with mman.make_cursor(fc.path):
                     exmsg = "with 1 active-Regions, held by 1 Cursors!"
@@ -137,8 +137,8 @@ class TestMMan(TestBase):
             try:
                 max_num_handles = 15
                 # small_size =
-                for mtype, args in ((StaticWindowMapManager, (0, fc.size // 3, max_num_handles)),
-                                    (SlidingWindowMapManager, (fc.size // 100, fc.size // 3, max_num_handles)),):
+                for mtype, args in ((GreedyMemmapManager, (0, fc.size // 3, max_num_handles)),
+                                    (TilingMemmapManager, (fc.size // 100, fc.size // 3, max_num_handles)),):
                     for item in (fc.path, fd):
                         assert len(data) == fc.size
 
@@ -147,7 +147,7 @@ class TestMMan(TestBase):
                             with man.make_cursor(item) as c:
                                 # still empty (more about that is tested in test_memory_manager()
                                 assert man.num_open_cursors == 1
-                                if not isinstance(man, SlidingWindowMapManager):
+                                if not isinstance(man, TilingMemmapManager):
                                     assert man.mapped_memory_size == fc.size
 
                             base_offset = 5000

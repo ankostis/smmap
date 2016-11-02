@@ -2,10 +2,10 @@ from mmap import ALLOCATIONGRANULARITY
 import sys
 from unittest.case import skipIf
 
-from smmap.mman import _MapWindow, align_to_mmap, SlidingWindowMapManager
+from smmap.mman import _MapWindow, align_to_mmap, TilingMemmapManager
 from smmap.util import is_64_bit, PY3
 
-from smmap.mwindow import WindowCursor
+from smmap.mwindow import FixedWindowCursor
 
 from .lib import TestBase, FileCreator
 
@@ -13,9 +13,9 @@ from .lib import TestBase, FileCreator
 class TestMWindow(TestBase):
 
     def test_cursor(self):
-        with SlidingWindowMapManager() as mman:
+        with TilingMemmapManager() as mman:
             with FileCreator(self.k_window_test_size, "cursor_test") as fc:
-                self.assertRaises(TypeError, WindowCursor, mman)  # missing args
+                self.assertRaises(TypeError, FixedWindowCursor, mman)  # missing args
 
                 cv = mman.make_cursor(fc.path)
                 assert not cv.closed
@@ -30,7 +30,7 @@ class TestMWindow(TestBase):
             cv.close()
 
     def test_region(self):
-        with SlidingWindowMapManager() as mman:
+        with TilingMemmapManager() as mman:
             with FileCreator(self.k_window_test_size, "window_test") as fc:
                 half_size = fc.size // 2
                 rofs = align_to_mmap(4200, False)
@@ -68,7 +68,7 @@ class TestMWindow(TestBase):
     def test_cursor_hangs(self):
         with FileCreator(1024 * 1024 * 8) as fc:
             #with self.assertRaisesRegex(ValueError, "cannot close exported pointers exist"):
-                with SlidingWindowMapManager() as mman:
+                with TilingMemmapManager() as mman:
                     with mman.make_cursor(fc.path) as c:
                         data = memoryview(c.map())
                         assert data[0:5] == b'\x00\x00\x00\x00\x00'

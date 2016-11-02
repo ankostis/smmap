@@ -3,10 +3,10 @@ from __future__ import print_function
 from .lib import TestBase, FileCreator
 
 from smmap.mman import (
-    SlidingWindowMapManager,
-    StaticWindowMapManager,
+    TilingMemmapManager,
+    GreedyMemmapManager,
 )
-from smmap.buf import SlidingWindowMapBuffer
+from smmap.buf import SlidingWindowCursor
 
 from random import randint
 from time import time
@@ -14,12 +14,12 @@ import sys
 import os
 
 
-man_optimal = (SlidingWindowMapManager, )
-man_worst_case = (SlidingWindowMapManager,
+man_optimal = (TilingMemmapManager, )
+man_worst_case = (TilingMemmapManager,
                   TestBase.k_window_test_size // 100,
                    TestBase.k_window_test_size // 3,
                    15)
-static_man = (StaticWindowMapManager, )
+static_man = (GreedyMemmapManager, )
 
 
 def make_mman(mman, *args):
@@ -32,7 +32,7 @@ class TestBuf(TestBase):
         with FileCreator(self.k_window_test_size, "buffer_test") as fc:
             # invalid paths fail upon construction
             with make_mman(*man_optimal) as mman:
-                buf = SlidingWindowMapBuffer(mman, fc.path, size=fc.size)
+                buf = SlidingWindowCursor(mman, fc.path, size=fc.size)
                 assert buf.closed
                 assert not buf.cursor
                 buf.close()
@@ -44,7 +44,7 @@ class TestBuf(TestBase):
                     assert len(buf) == fc.size
 
                 offset = 100
-                with SlidingWindowMapBuffer(mman, fc.path, offset) as buf:
+                with SlidingWindowCursor(mman, fc.path, offset) as buf:
                     assert len(buf) == fc.size - offset
                     assert not buf.closed
 
@@ -94,7 +94,7 @@ class TestBuf(TestBase):
                                         (man_worst_case, 'worst case'),
                                         (static_man, 'static optimal')):
                     with make_mman(*mman) as manager:
-                        with SlidingWindowMapBuffer(manager, item) as buf:
+                        with SlidingWindowCursor(manager, item) as buf:
                             assert manager.num_open_regions == 1
                             for access_mode in range(2):    # single, multi
                                 num_accesses_left = max_num_accesses
@@ -120,12 +120,12 @@ class TestBuf(TestBase):
                                 # END handle num accesses
 
                             assert manager.num_open_regions
-                            if isinstance(manager, SlidingWindowMapManager):
+                            if isinstance(manager, TilingMemmapManager):
                                 assert manager.num_open_regions >= 1
                             else:
                                 assert manager.num_open_regions == 1
                             assert manager.num_used_regions == 1
-                            if isinstance(manager, SlidingWindowMapManager):
+                            if isinstance(manager, TilingMemmapManager):
                                 assert manager.collect() >= 0
                             else:
                                 assert manager.collect() == 0    # all regions currently used by buf
