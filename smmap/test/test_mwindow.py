@@ -35,9 +35,10 @@ class TestMWindow(TestBase):
             with FileCreator(self.k_window_test_size, "window_test") as fc:
                 half_size = fc.size // 2
                 rofs = align_to_mmap(4200, False)
-                rfull = MapRegion(mman, fc.path, 0, fc.size)
-                rhalfofs = MapRegion(mman, fc.path, rofs, fc.size)
-                rhalfsize = MapRegion(mman, fc.path, 0, half_size)
+                rlist = mman.get_or_create_rlist(fc.path)
+                rfull = mman._make_region(rlist, ofs=0, size=fc.size)
+                rhalfofs = mman._make_region(rlist, ofs=rofs, size=fc.size)
+                rhalfsize = mman._make_region(rlist, ofs=0, size=half_size)
 
                 # offsets
                 assert rfull.ofs == 0 and rfull.size == fc.size
