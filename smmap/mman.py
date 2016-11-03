@@ -268,7 +268,7 @@ class MemmapManager(object):
                 self.num_open_regions, self.num_used_regions,
                 self.num_open_cursors)
 
-    def _open_region(self, finfo, ofs=0, size=0, flags=0):
+    def _open_region(self, finfo, ofs, size, flags=0):
         # type: (List[MemmapRegion], int, int, int, int) -> MemmapRegion
         """
         Opens the os-level mmap according to the given boundaries, wraps it in a region and registers it.
@@ -289,12 +289,16 @@ class MemmapManager(object):
         if is_path:
             fd = os.open(fd, os.O_RDONLY | getattr(os, 'O_BINARY', 0) | flags)
         try:
-            requested_size = min(finfo.file_size - ofs, size)
-            memmap = mmap.mmap(fd, requested_size, access=mmap.ACCESS_READ, offset=ofs)
+            avail_size = finfo.file_size - ofs
+            if size > 0:
+                avail_size = min(avail_size, size)  # TODO: modify also here for WRITTABLE-Regions
+            memmap = mmap.mmap(fd, avail_size, access=mmap.ACCESS_READ, offset=ofs)
             try:
                 region = self.MapRegionCls(self, finfo, ofs, len(memmap))
                 self._ix_reg_mmap.put(region, memmap)
-            except:
+            except Exception as ex:
+                log.warning("Failed allocating *mmap* (%s, %s) for %r due to:  %s!",
+                            avail_size, ofs, finfo.path_or_fd, ex)
                 memmap.close()
                 raise
         finally:
@@ -492,7 +496,12 @@ class MemmapManager(object):
             memmap = _ix_reg_mmap.take(region)
             if not self.regions_for_finfo(finfo):
                 _ix_path_finfo.take(finfo.path_or_fd)
-            memmap.close()  # Has to be the last step because it cannot rollback.
+            try:
+                memmap.close()  # Has to be the last step because it cannot rollback.
+            except Exception as ex:
+                ## Explain which mmap failed to close.
+                log.error("Failed closing %s due to: %s", region, ex)
+                raise
 
     def _release_cursor(self, cursor):
         """Remove `cursor` from ``_ix_cur_reg`` index only.
