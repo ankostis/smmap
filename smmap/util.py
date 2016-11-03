@@ -4,6 +4,7 @@ import itertools
 import logging
 import sys
 from weakref import ref
+from copy import copy
 
 try:
     from contextlib import ExitStack
@@ -139,7 +140,7 @@ class Relation(MutableMapping):
                  'rel',
                  'inv',             #: For "1-1" mapping, this is a `dict()` populated with {values->key}.
                  'null_keys',       #: Whether to accept null-keys on insert.
-                 'null_values',     #: Whether to accept null-values on insert.
+                 'null_vals',     #: Whether to accept null-values on insert.
                  'on_errors',    #: A `callable(registry, action, k, v, ex)` to handle errors.
                  'kname',           #: label printed in messages
                  'vname',           #: label printed in messages
@@ -153,14 +154,14 @@ class Relation(MutableMapping):
     MISSING = _Missing()
 
     def __init__(self, name='', one2one=False,
-                 null_keys=False, null_values=False,
+                 null_keys=False, null_vals=False,
                  kname='KEY', vname='VALUE',
                  on_errors=None,
                  dictfact=OrderedDict):
         self.rel = dictfact()
         if one2one:
             self.inv = type(self)(name, False,
-                                  null_values, null_keys,
+                                  null_vals, null_keys,
                                   vname, kname,
                                   on_errors,
                                   dictfact)
@@ -169,7 +170,7 @@ class Relation(MutableMapping):
             self.inv = None
         self.name = name
         self.null_keys = null_keys
-        self.null_values = null_values
+        self.null_vals = null_vals
         self.on_errors = on_errors
         self.kname = kname
         self.vname = vname
@@ -199,19 +200,44 @@ class Relation(MutableMapping):
         return len(self.rel)
 
     def __str__(self):
-        return str(self.rel)
+        name = self.name or type(self).__name__
+        link = '-->' if self.inv is None else '<->'
+        items = '\n  '.join('(%r, %r),' % i for i in self.rel.items())  # indent by 2
+        return '%s(%s%s%s%s%s) [\n  %s\n]' % (name,
+                                              self.kname, '' if self.null_keys else '*',
+                                              link,
+                                              self.vname, '' if self.null_vals else '*',
+                                              items)
 
     def __repr__(self):
-        return repr(self.rel)
+        return str(self)
+
+    def __eq__(self, o):
+        rel = self.rel
+        try:
+            return rel == o or isinstance(o, Relation) and rel == o.rel
+        except:
+            return False
+
+    def __hash__(self, o):
+        return hash(self.rel)
+
+    def _err_msg(self, action, msg, k, v):
+        return '%s(key: %s, value: %s) failed due to %s for %s' % (
+            action, k, v, msg, self)
+        ## TODO: Hit also inverse...
 
     def copy(self):
-        return self.rel.copy()
+        c = copy(self)
+        c.rel = copy(self.rel)
+        if self.inv is not None:
+            c.inv = copy(self.inv)
+        return c
 
     def clear(self):
-        return self.rel.clear()
-
-    def update(self, *args, **kwds):
-        return self.rel.update(*args, **kwds)
+        self.rel.clear()
+        if self.inv:
+            self.inv.clear()
 
     def items(self):
         return self.rel.items()
@@ -231,9 +257,9 @@ class Relation(MutableMapping):
 
         try:
             if not self.null_keys and k is None:
-                raise KeyError(self._err_msg(action, "Null %s" % kname, k, v))
-            if not self.null_values and v is None:
-                raise KeyError(self._err_msg(action, "Null %s" % vname, k, v))
+                raise KeyError(self._err_msg(action, "null %s" % kname, k, v))
+            if not self.null_vals and v is None:
+                raise KeyError(self._err_msg(action, "null %s" % vname, k, v))
             vv = rel.get(k, Relation.MISSING)
             if vv is not Relation.MISSING:
                 raise KeyError(self._err_msg(action, "%s already mapped to %s" % (kname, vv), k, v))
@@ -260,14 +286,14 @@ class Relation(MutableMapping):
         try:
             v = rel.get(k, Relation.MISSING)
             if v is Relation.MISSING:
-                raise KeyError(self._err_msg(action, "Missing %s" % kname, k, v))
+                raise KeyError(self._err_msg(action, "missing %s" % kname, k, v))
 
             if inverse:
                 kk = inverse.get(v, Relation.MISSING)
                 if kk is Relation.MISSING:
-                    raise KeyError(self._err_msg(action, "Missing invert-%s" % vname, k, v))
+                    raise KeyError(self._err_msg(action, "missing invert-%s" % vname, k, v))
                 if k is not kk:
-                    raise KeyError(self._err_msg(action, "Mismatch %s with inverted: %r <> %r" %
+                    raise KeyError(self._err_msg(action, "mismatch of %s with inverted one: %r != %r" %
                                                  (kname, k, kk), k, v))
                 del inverse[v]
             del rel[k]
@@ -279,20 +305,14 @@ class Relation(MutableMapping):
 
         return v
 
-    def _err_msg(self, action, msg, k, v):
-        link = '-->' if self.inv is None else '<->'
-        me = '\n  '.join(str(self).split('\n'))  # indent by 2
-        return '%s %s{%s%s%s}: %s (key: %s, value: %s)\n  %s' % (
-            action, self.name, self.kname, link, self.vname, msg, k, v, me)
-
     def hit(self, k):
         """Maintain LRU, by moving key to the end."""
-        action = 'TAKE'
+        action = 'HIT'
         rel = self.rel
         try:
             v = rel.get(k, Relation.MISSING)
             if v is Relation.MISSING:
-                raise KeyError(self._err_msg('HIT', "Missing %s" % self.kname, k, v))
+                raise KeyError(self._err_msg(action, "missing %s" % self.kname, k, v))
             try:
                 rel.move_to_end(k)
             except AttributeError:
@@ -303,7 +323,6 @@ class Relation(MutableMapping):
             else:
                 raise
 
-        ## TODO: Hit also inverse...
 
 try:
     from weakref import finalize  # @UnusedImport

@@ -4,8 +4,8 @@ from smmap.util import Relation
 
 class TestRelation(TestBase):
 
-    def test_Nto1(self):
-        rg = Relation()
+    def test_Nto1(self, recursed=None):
+        rg = recursed or Relation()
         assert rg.inv is None
 
         rg.put(1, 2)
@@ -19,8 +19,12 @@ class TestRelation(TestBase):
         self.assertRaises(KeyError, rg.take, 5)
         self.assertRaises(KeyError, rg.take, 3)
 
-    def test_1to1(self):
-        rg = Relation(one2one=True)
+        if recursed is None:
+            rg.clear()
+            self.test_Nto1(recursed=rg)
+
+    def test_1to1(self, recursed=None):
+        rg = recursed or Relation(one2one=True)
 
         rg.put(1, 2)
         rg.inv.put(11, 22)
@@ -40,8 +44,12 @@ class TestRelation(TestBase):
         assert rg.inv.take(11) == 22
         self.assertRaises(KeyError, rg.take, 3)
 
-    def test_Nto1_null(self):
-        rg = Relation(null_values=True)
+        if recursed is None:
+            rg.clear()
+            self.test_1to1(recursed=rg)
+
+    def test_Nto1_null(self, recursed=None):
+        rg = recursed or Relation(null_vals=True)
 
         rg.put(1, 2)
         rg.put(2, 2)
@@ -57,8 +65,12 @@ class TestRelation(TestBase):
         self.assertRaises(KeyError, rg.take, 3)
         self.assertRaises(KeyError, rg.take, None)
 
-    def test_1to1_null(self):
-        rg = Relation(one2one=True, null_values=True)
+        if recursed is None:
+            rg.clear()
+            self.test_Nto1_null(recursed=rg)
+
+    def test_1to1_null(self, recursed=None):
+        rg = recursed or Relation(one2one=True, null_vals=True)
 
         rg.put(1, 2)
         self.assertRaises(KeyError, rg.put, 2, 2)
@@ -73,6 +85,12 @@ class TestRelation(TestBase):
         assert rg.take(3) == None
         self.assertRaises(KeyError, rg.take, 3)
         self.assertRaises(KeyError, rg.take, None)
+
+        if recursed is None:
+            rg.clear()
+            self.test_1to1_null(recursed=rg)
+            rg.clear()
+            self.test_1to1_null(recursed=rg)
 
     def test_rollback_put_ok(self):
         rg = Relation(one2one=True)
@@ -138,3 +156,19 @@ class TestRelation(TestBase):
         self.assertRaises(ValueError, rg.put, 1, 2)
         self.assertRaises(ValueError, rg.take, 0)
         self.assertRaises(ValueError, rg.hit, 's')
+
+    def test_to_str(self):
+        rg = Relation(one2one=1, null_vals=1)
+        rg.put(1, None)
+        rg.put('hh', 3)
+        s = str(rg)
+        ss = "Relation(KEY*<->VALUE) [\n  (1, None),\n  ('hh', 3),\n]"
+        assert s == ss, (s, ss)
+
+        rg = Relation(name='Ledger', null_keys=1, kname='KKE', vname='VELA')
+        rg.put(1, 2)
+        rg.put('hh', 3)
+        rg.put(None, 4)
+        s = str(rg)
+        ss = "Ledger(KKE-->VELA*) [\n  (1, 2),\n  ('hh', 3),\n  (None, 4),\n]"
+        assert s == ss, (s, ss)
