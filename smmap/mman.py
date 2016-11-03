@@ -166,12 +166,9 @@ class MemmapManagerError(Exception):
 
     Always ``arg[0]`` is the *mem-manager*.
     """
-    def __init__(self, mman, *args):
-        super(MemmapManagerError, self).__init__(mman, *args)
-
-    def __str__(self):
-        msg = '\n  '.join(str(self.args[1]).split('\n'))  # indent by 2
-        return 'MemmapManagerError(%s): \n  %s' % (self.args[0], msg)
+    def __init__(self, mman, errs):
+        msg = '\n  '.join(str(errs).split('\n'))  # indent by 2
+        super(MemmapManagerError, self).__init__(mman, msg)
 
 
 class MemmapManager(object):
