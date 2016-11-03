@@ -176,19 +176,35 @@ class MemmapManagerError(Exception):
 class MemmapManager(object):
 
     """
-    .. Tip::
-        This is can be used optionally as a non-reetrant reusable context-manager
-        inside a ``with ...:`` block, to enusre eny resources are cleared.
-        Any errors on :meth:`close()` will be reported as warnings.
+    Creates and manages window-handles (regions & cursors) for memory-mapped files.
+
+    - The fundamental memory-handle type to be managed in the :class:`MMapRegion` because
+      they encapsulate the underlying os-level *mmap*.
+
+    - Different managers produce *regions* with different sizes, and consequently,
+      different *cursor* sizes.
+
+    - *Ranges* becoming "unused" are not immediatelly closed
+
+    - Allocations might fail once a the :attr:`max_memory_size` or :attr:`max_regions_count` limits
+      are reached, or if the allocation of os-level *mmaps* fail.  In that case, the least recently used (LRU),
+      but "unused" *regions* are automatically released.
+
+    - This is can be used optionally as a non-reetrant reusable context-manager
+      inside a ``with ...:`` block, to enusre eny resources are cleared.
+      Any errors on :meth:`close()` will be reported as warnings.
+
+    - Not thread-safe!
+
     """
 
     __slots__ = (
         '_ix_path_finfo',       # 1-1 registry of {path   <-> finfo}
         '_ix_reg_mmap',         # 1-1 registry of {region <-> mmap} (LRU!)
         '_ix_cur_reg',          # N-1 registry of {cursor --> region}
-        'window_size',         # maximum size of a window
+        'window_size',          # maximum size of a windo
         'max_memory_size',      # maximum amount of memory we may allocate
-        'max_regions_count',     # maximum amount of handles to keep open
+        'max_regions_count',    # maximum amount of handles to keep open
         '_finalize',            # To replace __del_
         '__weakref__',          # To replace __del_
     )
@@ -451,7 +467,7 @@ class MemmapManager(object):
 
     @contextmanager
     def _cursor_bound(self, cursor, offset=0, size=0, flags=0):
-        """Used by the sliding-cursor* only - fixed cursors are bound on construction."""
+        """Used by the *sliding-cursor* only - fixed cursors are bound on construction."""
         region = self._obtain_region(cursor.finfo, offset, size, flags, False)
         self._bind_cursor(cursor, region)
 
@@ -526,19 +542,18 @@ class MemmapManager(object):
 
         :param offset:
             absolute offset in bytes into the file
-        :param size:
-            amount of bytes to map. If 0, all available bytes will be mapped
 
         :param size:
             the total size of the mapping requested. A non-positive means "as big possible".
-
-            The resulting cursor's size (``len()``) depends on the `sliding` argument:
+            The actual size of the cursor returned (the ``len()``) depends
+            a0 on the type of the *memmap-manager* and on the `sliding` argument:
 
             - If ``sliding==False``, it may be smaller than requested, either because
-              the file-size was smaller, te *mman*'s :attr:`window_size` is smaller,
+              the file-size was smaller, the *memmap-manager*'s :attr:`window_size` is smaller,
               or because the map was created between two existing regions.
 
-            - If ``sliding==True``, will be the given size.
+            - If ``sliding==True`` and it is a :class:`TilingMemmapManager`,
+              it will always be the exact given size, if it's positive, or the files-size .
 
         :param flags:
             additional flags for ``os.open()`` in case there is no region open for this file.
@@ -653,11 +668,12 @@ class MemmapManager(object):
 
 class GreedyMemmapManager(MemmapManager):
     """
-    A manager producing cursors that always map the whole file.
+    A manager mapping each file into a single full-size region.
 
-    Clients must be written to specifically know that they are accessing their data
-    through a GreedyMemmapManager, as they otherwise have to deal with their window size.
-    These clients would have to use a SlidingWindowCursor to hide this fact.
+    - TODO: If a positive :attr:`window_size`` has been set, opening *regions* for files with sizes
+      exceeding this limit will fail!  Use *sliding-memmap-managers* for such files.
+
+    - Clients using cursors from this manager may be simpler as they can access.
     """
     def _obtain_region(self, finfo, offset, size, flags, is_recursive):
         """Create new region without registering it.
@@ -705,18 +721,11 @@ class GreedyMemmapManager(MemmapManager):
 
 class TilingMemmapManager(MemmapManager):
 
-    """Maintains a list of ranges of mapped memory regions in one or more files and allows to easily
-    obtain additional regions assuring there is no overlap.
-    Once a certain memory limit is reached globally, or if there cannot be more open file handles
-    which result from each mmap call, the least recently used, and currently unused mapped regions
-    are unloaded automatically.
+    """
+    A manager where there can be multiple, but non-overlapping *regions* open for a single file.
 
-    **Note:** currently not thread-safe !
-
-    **Note:** in the current implementation, we will automatically unload windows if we either cannot
-        create more memory maps (as the open file handles limit is hit) or if we have allocated more than
-        a safe amount of memory already, which would possibly cause memory allocations to fail as our address
-        space is full."""
+    Clients wishing to maintain *greedy-memmap-manaaer*'s simplicity may use *sliding-cursors*.
+    """
 
     __slots__ = ()
 
