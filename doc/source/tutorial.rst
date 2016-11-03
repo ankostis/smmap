@@ -110,7 +110,7 @@ But it is safer to include their access within a ``with ...:`` blocks::
     ...     assert data[0] == fdata[0]
     ...     assert data[-1] == data[c.size - 1] == ord(b'\xee')
 
-    >>> assert c.closed         # Cursor closed automatically.
+    >>> assert c.closed         # Cursor closed on context-exit .
 
 Notice that you cannot interrogate the data from a "closed" cursor::
 
@@ -134,6 +134,9 @@ If you ask for a cursor beyond the file-size (20 in this example), it will fail:
     Traceback (most recent call last):
     ValueError: Offset(21) beyond file-size(20) for file:
         ...
+        
+    >>> assert c.closed         # Previous cursor remains closed anyhow.
+
 
 Its recommended not to create big slices when feeding the buffer
 into consumers (e.g. struct or zlib).

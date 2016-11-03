@@ -104,7 +104,9 @@ class _MapWindow(object):
         nofs = align_to_mmap(self.ofs, 0)
         self.size += self.ofs - nofs                # keep end-point constant
         self.ofs = nofs
-        self.size = align_to_mmap(self.size, 1)     #TODO: Do NOT align end-pint, to respect `window-size`.
+        ## Do NOT align end-point, to respect `window-size`,
+        #  and to save some time loading from disk.
+        #self.size = align_to_mmap(self.size, 1)
 
     def extend_left_to(self, window, max_size):
         """Adjust the offset to start where the given window on our left ends if possible,
@@ -261,9 +263,9 @@ class MemmapManager(object):
 
     def __repr__(self):
         if self.closed:
-            return "%s(winize=%s, CLOSED)" % (type(self).__name__, self.window_size)
+            return "%s(winsize=%s, CLOSED)" % (type(self).__name__, self.window_size)
         else:
-            return "%s(winize=%s, files=%s, regs=(%s, %s), curs=%s)" % (
+            return "%s(winsize=%s, files=%s, regs=(%s, %s), curs=%s)" % (
                 type(self).__name__, self.window_size, self.num_open_files,
                 self.num_open_regions, self.num_used_regions,
                 self.num_open_cursors)
@@ -321,10 +323,6 @@ class MemmapManager(object):
         .. Note::
             We don't raise exceptions anymore, in order to keep the system working, allowing temporary overallocation.
             If the system runs out of memory, it will tell.
-
-        .. TODO::
-            Implement a case where all unusued regions are discarded efficiently.
-            Currently its only brute force.
         """
         ## Traverse the LRU-sorted `_ix_reg_mmap` and purge regions with no clients.
         #  until enough memory/mmaps are free.

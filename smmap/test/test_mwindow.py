@@ -149,13 +149,14 @@ class TestSliding(TestBase):
                 assert region.size == winsize
                 assert region.size == winsize
 
-                ## Make a dissjoined region
-                ofs = 2 * winsize
+                ## Make a dissjoined region.
+                ofs = 2 * winsize   # == 10
                 assert c[ofs] == fdata[ofs]
                 assert mman.num_open_regions == 2
                 assert mman.num_used_regions == 0
                 region = mman.regions_for_finfo(c.finfo)[1]
-                assert region.size == winsize
+                ## OK, region grows from 0 (aligned) to include offset (10).
+                assert region.size == ofs + 1
 
     def test_performance(self):
         # PERFORMANCE
