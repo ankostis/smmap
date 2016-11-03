@@ -670,12 +670,12 @@ class GreedyMemmapManager(MemmapManager):
     """
     A manager mapping each file into a single full-size region.
 
-    - TODO: If a positive :attr:`window_size`` has been set, opening *regions* for files with sizes
+    - If a positive :attr:`window_size`` has been set, opening *regions* for files with sizes
       exceeding this limit will fail!  Use *sliding-memmap-managers* for such files.
 
     - Clients using cursors from this manager may be simpler as they can access.
     """
-    def _obtain_region(self, finfo, offset, size, flags, is_recursive):
+    def _obtain_region(self, finfo, offset, _, flags, is_recursive):
         """Create new region without registering it.
 
         For more information on the parameters, see :meth:`make_cursor()`.
@@ -683,9 +683,15 @@ class GreedyMemmapManager(MemmapManager):
         :return: The newly created region
         """
         fsize = finfo.file_size
+
         if offset >= fsize:
-            raise ValueError("Offset(%s) beyond file-size(%s) for file: %r"
-                             % (offset, fsize, finfo))
+            raise ValueError("Offset(%s) beyond file-size(%s) for file: %r" %
+                             (offset, fsize, finfo))
+
+        window_size = self.window_size
+        if window_size > 0 and fsize > window_size:
+            raise ValueError("File-size exceeds window-size limit %s: %r" %
+                             (window_size, finfo))
 
         rlist = self.regions_for_finfo(finfo)
         if rlist:
@@ -694,17 +700,13 @@ class GreedyMemmapManager(MemmapManager):
         else:
             ## Clamp size to file-size/window-size
             #
-            avail_size = min(fsize, self.window_size)
-            if 0 < size < avail_size:
-                avail_size = size
-
-            if (self.mapped_memory_size + size > self.max_memory_size or
+            if (self.mapped_memory_size + fsize > self.max_memory_size or
                     self.num_open_regions >= self.max_regions_count):
-                self._purge_lru_regions(avail_size)
+                self._purge_lru_regions(fsize)
                 is_recursive = True  # Don't recurse below, just cleaned all there is.
 
             try:
-                r = self._open_region(finfo, 0, sys.maxsize, flags)
+                r = self._open_region(finfo, 0, fsize, flags)
             except Exception:
                 ## Apparently we are out of system resources.
                 #  We free up as many regions as possible and retry,
@@ -713,7 +715,7 @@ class GreedyMemmapManager(MemmapManager):
                 if is_recursive:
                     raise
                 self._purge_lru_regions(0)
-                r = self._obtain_region(finfo, offset, avail_size, flags, True)
+                r = self._obtain_region(finfo, 0, fsize, flags, True)
 
         assert r.includes_ofs(offset)
         return r
