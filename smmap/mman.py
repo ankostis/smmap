@@ -102,9 +102,9 @@ class _MapWindow(object):
     def align(self):
         """Assures the previous window area is contained in the new one"""
         nofs = align_to_mmap(self.ofs, 0)
-        self.size += self.ofs - nofs    # keep size constant
+        self.size += self.ofs - nofs                # keep end-point constant
         self.ofs = nofs
-        self.size = align_to_mmap(self.size, 1)
+        self.size = align_to_mmap(self.size, 1)     #TODO: Do NOT align end-pint, to respect `window-size`.
 
     def extend_left_to(self, window, max_size):
         """Adjust the offset to start where the given window on our left ends if possible,

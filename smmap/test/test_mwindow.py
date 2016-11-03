@@ -132,6 +132,31 @@ class TestSliding(TestBase):
 
                 assert mman.num_open_regions == 1, mman.num_open_regions
 
+    def test_win_size(self):
+        fsize = 15
+        winsize = fsize // 3
+
+        with FileCreator(fsize, "winsize") as fc:
+            with open(fc.path, 'rb') as fp:
+                fdata = fp.read()
+
+            with TilingMemmapManager(window_size=winsize) as mman:
+                c = mman.make_cursor(fc.path, sliding=True)
+                assert c[0] == fdata[0]
+                assert mman.num_open_regions == 1
+                assert mman.num_used_regions == 0
+                region = mman.regions_for_finfo(c.finfo)[0]
+                assert region.size == winsize
+                assert region.size == winsize
+
+                ## Make a dissjoined region
+                ofs = 2 * winsize
+                assert c[ofs] == fdata[ofs]
+                assert mman.num_open_regions == 2
+                assert mman.num_used_regions == 0
+                region = mman.regions_for_finfo(c.finfo)[1]
+                assert region.size == winsize
+
     def test_performance(self):
         # PERFORMANCE
         # blast away with random access and a full mapping - we don't want to

@@ -76,17 +76,24 @@ Note that as long as a *cursor* points into a *region*, the later is considered 
 and cannot been collected, even if resources are falling short, so you must release them
 asap.
 
-Let's make a sample file full of zeros (remember to delete it later with ``del fc``)::
+Let's make a sample file with random bytes (remember to delete it later with ``del fc``)::
 
     >>> import smmap.test.lib
     >>> fc = smmap.test.lib.FileCreator(20, "test_file", final_byte=b'\xee')
-
+    >>> with open(fc.path, 'rb') as fp:
+    ...     fdata = fp.read()
+    >>> fdata[-1:] == b'\xee'
+    True
+    
+        
 and asked as much data as possible starting, from offset 0::
 
     >>> mman = smmap.TilingMemmapManager()      # Remember to close it
     >>> c = mman.make_cursor(fc.path)
-    >>> assert c.ofs == 0
-    >>> assert c.size == fc.size
+    >>> c.ofs == 0
+    True
+    >>> c.size == fc.size
+    True
 
 Since cursors hold open files for memory mapping, you must explicitly call :meth:`c.close()`
 or the more "strict" :meth:`c.release()` (only once invocation allowed)::
@@ -100,8 +107,8 @@ But it is safer to include their access within a ``with ...:`` blocks::
     ...     assert not c.closed
     ...     assert c.size == fc.size
     ...     data = c.buffer()
-    ...     assert data[0] == 0
-    ...     assert data[-1] == data[c.size - 1]
+    ...     assert data[0] == fdata[0]
+    ...     assert data[-1] == data[c.size - 1] == ord(b'\xee')
 
     >>> assert c.closed         # Cursor closed automatically.
 
@@ -109,15 +116,17 @@ Notice that you cannot interrogate the data from a "closed" cursor::
 
     >>> c.buffer()[0]
     Traceback (most recent call last):
-        ...
     AttributeError: 'NoneType' object has no attribute 'buffer'
 
 You can still query absolute offsets, and check whether an offset is included
 in the cursor's data::
 
-    >>> assert c.ofs < c.ofs_end
-    >>> assert c.includes_ofs(19)
-    >>> assert not c.includes_ofs(20)
+    >>> c.ofs < c.ofs_end
+    True
+    >>> c.includes_ofs(19)
+    True
+    >>> c.includes_ofs(20)
+    False
 
 If you ask for a cursor beyond the file-size (20 in this example), it will fail::
 
@@ -136,11 +145,20 @@ Once a cursor has been closed, you may still obtain a new cursor bound
 on another region of the file with :meth:`c.make_cursor()` or :meth:`c.next_cursor()`::
 
     >>> with c.make_cursor(10, 5) as c2:
+    ...     assert c2 is not c          # a new cursor indeed
     ...     data = c2.buffer()
-    ...     assert data[0:5] == b'\x00\x00\x00\x00\x00'
-    >>> with c2.next_cursor() as c3:
-    ...     assert c3.ofs == 15
-    ...     assert c3.buffer()[0:5] == b'\x00\x00\x00\x00\xee'
+    ...     assert data[0:5] == fdata[10:15]
+    
+    >>> with c2.next_cursor() as c:     # start re-using the `c` var
+    ...     assert c.ofs == 15
+    ...     assert c.buffer()[0:5] == fdata[15:]
+
+    >>> with c.next_cursor() as c:
+    ...     """Got pas the end of the file..."""
+    Traceback (most recent call last):
+    ValueError: Offset(20) beyond file-size(20) for file: ...
+
+
 
 
 Now you would have to write your algorithms around this interface to properly slide through
@@ -149,38 +167,55 @@ huge amounts of data.  Alternatively you can use the "sliding-buffer" convenienc
 
 Sliding cursors
 ---------------
-To facilitate usability at the expense of performance, the *sliding-cursor*
-uses multiple regions internally.  That way you can access all data in a possibly huge file. 
-without having tediously acquire cursors to different regions.
+To facilitate usability at the expense of performance, the :class:`smmap.mwindow.SlidingWindowCursor`
+uses multiple regions internally.  That way you can access all data in a possibly huge file 
+with a single *cursor*. 
 
-You need the *tiling-memmap-manager* for that to work::
+And actually you don't have to tediously acquire and release cursors, 
+acquiring the *mmemp-manager* is enough.  
 
-    >>> #  No need to wrap cursor in a with block.  But we can do it or the memmep-manger.
-    >>> #
+.. Note::
+   Only *tiling-memmap-managers* can create *sliding-cursors*.
+
+::
+
     >>> with smmap.TilingMemmapManager() as mman:
     ...     c = mman.make_cursor(fc.path, sliding=True)
-    ...     assert not c.closed                     # Born open ...
-    ...     assert c.size == fc.size                # till the end of the file ...
-    >>> assert not c.closed                         # stays open...
-    >>> c.close()                                   # and ...
-    >>> assert not c.closed                         # never closes.
+    ...     assert c.size == fc.size                        # A cursore till the end of the file.
+    ...     assert c[0] == fdata[0]                         # access the first byte
+    ...     assert c[-1] == ord(b'\xee')                    # access the last ten bytes on the file
+    ...     assert c[-5:] == fdata[fc.size - 5:fc.size]     # access the last five bytes
+    ...
+    ...     assert not c.closed                             # Note that the cursor is born open ...
+    ...     c.close()                                       # and stays open even if ...
+    ...     assert not c.closed                             # told to close.
+    >>> c.closed                                            # It closes only if it's memmap-manager has closed.
+    True 
 
-    >>> with smmap.TilingMemmapManager() as mman:
-    ...     c = mman.make_cursor(fc.path, sliding=True)    # NOTE you must re-create the cursor for the new mmanager.
-    ...     assert c[0] == 0	                           # access the first byte
-    ...     assert c[-1] == ord(b'\xee')                   # access the last ten bytes on the file
-    ...     assert c[-5:] == b'\x00\x00\x00\x00\xee'       # access the last five bytes
-
+Let's artificially limit the ``window_size`` of the *memmap-manager* to have it 
+generate multiple regions::
+    
+    >>> win_size = 5
+    >>> with smmap.TilingMemmapManager(window_size=win_size) as mman:
+    ...     c = mman.make_cursor(fc.path, sliding=True)     # NOTE: you must re-create the cursor for the new mmanager.
+    ...     assert mman.num_open_regions == 0               # Initially, no resources allocated.
+    ...     assert c[0] == fdata[0]                         # Create a region for the 1st-byte...
+    ...     assert mman.num_open_regions == 1               # and a region has been created ...
+    ...     assert mman.num_used_regions == 0               # but is now "cached".
+    ...     region = mman.regions_for_finfo(c.finfo)[0]
+    ...     assert region.size == win_size
+    ...     assert c[5] == fdata[5]                         # Access a byte byond the region and ...
+    ...     assert mman.num_open_regions == 2               # a 2nd "cached" region gets created...
 
 If you need different initial offsets/size/flags, then you have to create a new instance.
 
 
 Disadvantages
 -------------
-Buffers cannot be used in place of strings or maps, hence you have to slice them
-to have valid input for the sorts of struct and zlib.
-A slice means a lot of data handling overhead which makes buffers slower compared to
-using cursors directly.
+- *Sliding-cursors* cannot be used in place of strings or maps, hence you have to slice them
+  to have valid input for the sorts of *struct* and *zlib* libraries.
+- A slice means a lot of data handling overhead which makes *sliding* cursors slower 
+  compared to *fixed* ones.
 
 
 .. Tip::

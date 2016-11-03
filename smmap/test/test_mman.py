@@ -147,14 +147,18 @@ class TestMMan(TestBase):
     @skipIf(not PY3, "mmap is not a buffer, so memoryview fails")
     def test_mman_not_close_with_memoryviews(self):
         with FileCreator(1024) as fc:
+            with open(fc.path, 'rb') as fp:
+                fdata_head = fp.read(5)
             with FileCreator(8) as fc2:
+                with open(fc2.path, 'rb') as fp:
+                    fdata2_head = fp.read(5)
                 with self.assertRaises(MemmapManagerError) as t:
                     with TilingMemmapManager() as mman:
                         c = mman.make_cursor(fc.path)
                         memmap = mman._mmap_for_region(c.region)
                         data = memoryview(memmap)
 
-                        assert data[0:5] == b'\x00\x00\x00\x00\x00'
+                        assert data[0:5] == fdata_head
 
                         c2 = mman.make_cursor(fc.path, fc.size - 10)
                         memmap = mman._mmap_for_region(c2.region)
@@ -163,6 +167,7 @@ class TestMMan(TestBase):
                         c3 = mman.make_cursor(fc2.path)
                         memmap = mman._mmap_for_region(c3.region)
                         data3 = memoryview(memmap)
+                        assert data3[:5] == fdata2_head
 
                     assert data[3] == 0
                 ex_msg = str(t.exception)

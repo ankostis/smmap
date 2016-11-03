@@ -331,8 +331,8 @@ class SlidingWindowCursor(WindowHandle):
 
     @property
     def closed(self):
-        """Never closes"""
-        return False
+        """Closes only if parent mmemap-manager has closed."""
+        return self.mman.closed
 
     def release(self):
         """Do nothing, regions are held only while its methods are running."""
