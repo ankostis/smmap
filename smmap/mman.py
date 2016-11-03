@@ -9,7 +9,6 @@ import mmap
 import os
 import sys
 
-from future.utils import raise_from
 from smmap.util import string_types, Relation, PY3, finalize
 
 from .mwindow import (
@@ -259,7 +258,10 @@ class MemmapManager(object):
     #{ Internal Methods
 
     def _wrap_index_ex(self, rel, action, key, val, ex):
-        raise_from(MemmapManagerError(self, *ex.args), None)
+        if PY3:
+            exec('raise MemmapManagerError(self, *ex.args) from None')
+        else:
+            raise MemmapManagerError(self, *ex.args)
 
     def __repr__(self):
         if self.closed:

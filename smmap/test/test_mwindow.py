@@ -7,7 +7,7 @@ from time import time
 
 from smmap.mman import _MapWindow, align_to_mmap, TilingMemmapManager, GreedyMemmapManager
 
-from smmap.mwindow import FixedWindowCursor, SlidingWindowCursor
+from smmap.mwindow import FixedWindowCursor
 
 from .lib import TestBase, FileCreator
 
@@ -109,7 +109,6 @@ class TestSliding(TestBase):
                 assert len(buf) == fc.size - offset
                 assert not buf.closed
 
-
                 # simple access
                 with open(fc.path, 'rb') as fp:
                     data = fp.read()
@@ -125,7 +124,6 @@ class TestSliding(TestBase):
                 ## Born open, stays open...
                 buf.close()
                 assert not buf.closed
-
 
                 # Killing it is ok?
                 del(buf)
