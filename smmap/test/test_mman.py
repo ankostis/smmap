@@ -5,7 +5,7 @@ from random import randint
 import sys
 from time import time
 
-from smmap.mman import (
+from ..mman import (
     align_to_mmap,
     ALLOCATIONGRANULARITY,
     TilingMemmapManager,

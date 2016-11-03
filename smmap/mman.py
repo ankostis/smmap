@@ -4,12 +4,11 @@ Module containing a memory memory manager which provides a sliding window on a n
 .. default-role:: object
 """
 from collections import namedtuple
+from contextlib import contextmanager
 import logging
 import mmap
 import os
 import sys
-
-from smmap.util import string_types, Relation, PY3, finalize
 
 from .mwindow import (
     MemmapRegion,
@@ -17,11 +16,14 @@ from .mwindow import (
     SlidingWindowCursor,
 )
 from .util import (
+    PY3,
     is_64_bit,
     suppress,
+    string_types,
+    Relation,
+    finalize,
     ExitStack,
 )
-from contextlib import contextmanager
 
 
 __all__ = ['managed_mmaps', "MemmapManagerError",

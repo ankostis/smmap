@@ -1,5 +1,5 @@
-from smmap.test.lib import TestBase
-from smmap.util import Relation
+from ..test.lib import TestBase
+from ..util import Relation
 
 
 class TestRelation(TestBase):
@@ -82,7 +82,7 @@ class TestRelation(TestBase):
         ## Deletions
         rg.take(1)
         self.assertRaises(KeyError, rg.take, 2)
-        assert rg.take(3) == None
+        assert rg.take(3) is None
         self.assertRaises(KeyError, rg.take, 3)
         self.assertRaises(KeyError, rg.take, None)
 

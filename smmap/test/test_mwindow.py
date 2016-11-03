@@ -5,17 +5,14 @@ from random import randint
 import sys
 from time import time
 
-from smmap.mman import _MapWindow, align_to_mmap, TilingMemmapManager, GreedyMemmapManager
-
-from smmap.mwindow import FixedWindowCursor
-
+from ..mman import (
+    _MapWindow,
+    align_to_mmap,
+    TilingMemmapManager,
+    GreedyMemmapManager,
+)
+from ..mwindow import FixedWindowCursor
 from .lib import TestBase, FileCreator
-
-
-try:
-    from unittest import skipIf
-except ImportError:
-    from unittest2 import skipIf  # @UnusedImport
 
 
 try:

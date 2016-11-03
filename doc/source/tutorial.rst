@@ -84,8 +84,8 @@ Let's make a sample file with random bytes (remember to delete it later with ``d
     ...     fdata = fp.read()
     >>> fdata[-1:] == b'\xee'
     True
-    
-        
+
+
 and asked as much data as possible starting, from offset 0::
 
     >>> mman = smmap.TilingMemmapManager()      # Remember to close it
@@ -134,7 +134,7 @@ If you ask for a cursor beyond the file-size (20 in this example), it will fail:
     Traceback (most recent call last):
     ValueError: Offset(21) beyond file-size(20) for file:
         ...
-        
+
     >>> assert c.closed         # Previous cursor remains closed anyhow.
 
 
@@ -151,7 +151,7 @@ on another region of the file with :meth:`c.make_cursor()` or :meth:`c.next_curs
     ...     assert c2 is not c          # a new cursor indeed
     ...     data = c2.buffer()
     ...     assert data[0:5] == fdata[10:15]
-    
+
     >>> with c2.next_cursor() as c:     # start re-using the `c` var
     ...     assert c.ofs == 15
     ...     assert c.buffer()[0:5] == fdata[15:]
@@ -171,11 +171,11 @@ huge amounts of data.  Alternatively you can use the "sliding-buffer" convenienc
 Sliding cursors
 ---------------
 To facilitate usability at the expense of performance, the :class:`smmap.mwindow.SlidingWindowCursor`
-uses multiple regions internally.  That way you can access all data in a possibly huge file 
-with a single *cursor*. 
+uses multiple regions internally.  That way you can access all data in a possibly huge file
+with a single *cursor*.
 
-And actually you don't have to tediously acquire and release cursors, 
-acquiring the *mmemp-manager* is enough.  
+And actually you don't have to tediously acquire and release cursors,
+acquiring the *mmemp-manager* is enough.
 
 .. Note::
    Only *tiling-memmap-managers* can create *sliding-cursors*.
@@ -193,11 +193,11 @@ acquiring the *mmemp-manager* is enough.
     ...     c.close()                                       # and stays open even if ...
     ...     assert not c.closed                             # told to close.
     >>> c.closed                                            # It closes only if it's memmap-manager has closed.
-    True 
+    True
 
-Let's artificially limit the ``window_size`` of the *memmap-manager* to have it 
+Let's artificially limit the ``window_size`` of the *memmap-manager* to have it
 generate multiple regions::
-    
+
     >>> win_size = 5
     >>> with smmap.TilingMemmapManager(window_size=win_size) as mman:
     ...     c = mman.make_cursor(fc.path, sliding=True)     # NOTE: you must re-create the cursor for the new mmanager.
@@ -217,7 +217,7 @@ Disadvantages
 -------------
 - *Sliding-cursors* cannot be used in place of strings or maps, hence you have to slice them
   to have valid input for the sorts of *struct* and *zlib* libraries.
-- A slice means a lot of data handling overhead which makes *sliding* cursors slower 
+- A slice means a lot of data handling overhead which makes *sliding* cursors slower
   compared to *fixed* ones.
 
 

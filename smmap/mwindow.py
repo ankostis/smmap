@@ -10,7 +10,7 @@ Cursors/Regiond Differences
 import logging
 import sys
 
-from smmap.util import buffer, finalize, suppress
+from .util import buffer, finalize, suppress
 
 
 __all__ = ["FixedWindowCursor", "SlidingWindowCursor", "MemmapRegion"]

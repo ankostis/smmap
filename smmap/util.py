@@ -9,7 +9,7 @@ from copy import copy
 try:
     from contextlib import ExitStack
 except ImportError:
-    from contextlib2 import ExitStack  # @UnusedImport
+    from contextlib2 import ExitStack  # noqa F401 @UnusedImport
 
 try:
     from collections import OrderedDict
@@ -41,7 +41,7 @@ PY3 = sys.version_info[0] >= 3
 if PY3:
     string_types = str
 else:
-    string_types = basestring  # @UndefinedVariable
+    string_types = basestring  # noqa F821 @UndefinedVariable
 
 #}END utilities
 

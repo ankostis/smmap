@@ -1,27 +1,33 @@
 language: python
 python:
-  # These versions are unsupported by travis, even though smmap claims to still support these outdated versions
-  # - 2.4
-  # - 2.5
-  - 2.6
-  - 2.7
-  - 3.3
-  - 3.4
-  - 3.5
+    # These versions are unsupported by travis, even though smmap claims to still support these outdated versions
+    # - 2.4
+    # - 2.5
+    - 2.6
+    - 2.7
+    - 3.3
+    - 3.4
+    - 3.5
+
 matrix:
-  allow_failures:
-    - python: 2.6
+    allow_failures:
+        - python: 2.6
 
 env:
-  # test with paths containing the unicode characters
-  - TMPDIR="/tmp/καλημέρα"
+    # test with paths containing the unicode characters
+    - TMPDIR="/tmp/καλημέρα"
+
 install:
-  - pip install coveralls
-  - pip install -r requirements.txt
-  - ln -s /tmp "$TMPDIR"
+    - pip install coveralls
+    - pip install -r test-requirements.txt
+    - ln -s /tmp "$TMPDIR"
+
 script:
-  - ulimit -n 48
-  - ulimit -n
-  - nosetests -vd --with-coverage
+    - ulimit -n 48
+    - ulimit -n
+    - nosetests -vd --with-coverage
+    - if [ "$TRAVIS_PYTHON_VERSION" == '3.4' ]; then flake8; fi
+    - if [ "$TRAVIS_PYTHON_VERSION" == '3.5' ]; then cd doc && make html; fi
+
 after_success:
-  - coveralls
+    - coveralls
