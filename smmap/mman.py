@@ -780,13 +780,6 @@ class TilingMemmapManager(MemmapManager):
             if 0 < size < avail_size:
                 avail_size = size
 
-            ## We honor max memory size, and assure we have enough memory available.
-            #
-            if (self.mapped_memory_size + avail_size > self.max_memory_size or
-                    self.num_open_regions >= self.max_regions_count):
-                self._purge_lru_regions(window_size)
-                is_recursive = True  # Don't recurse below, just cleaned all there is.
-
             left = self._MapWindowCls(0, 0)
             mid = self._MapWindowCls(offset, avail_size)
             right = self._MapWindowCls(fsize, 0)
@@ -830,6 +823,13 @@ class TilingMemmapManager(MemmapManager):
             if mid.ofs_end > right.ofs:
                 mid.size = right.ofs - mid.ofs
             # END readjust size
+
+            ## We honor max memory size, and assure we have enough memory available.
+            #
+            if (self.mapped_memory_size + mid.size >= self.max_memory_size or
+                    self.num_open_regions >= self.max_regions_count):
+                self._purge_lru_regions(mid.size)
+                is_recursive = True  # Don't recurse below, just cleaned all there is.
 
             # insert new region at the right offset to keep the order
             try:
