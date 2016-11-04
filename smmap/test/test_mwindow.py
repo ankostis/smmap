@@ -8,6 +8,7 @@ from time import time
 from ..mman import (
     _MapWindow,
     align_to_mmap,
+    ALLOCATIONGRANULARITY,
     TilingMemmapManager,
     GreedyMemmapManager,
 )
@@ -128,8 +129,8 @@ class TestSliding(TestBase):
                 assert mman.num_open_regions == 1, mman.num_open_regions
 
     def test_win_size(self):
-        fsize = 15
-        winsize = fsize // 3
+        winsize = 1  # The minimum, but size will be page-size.
+        fsize = 3 * ALLOCATIONGRANULARITY
 
         with FileCreator(fsize, "winsize") as fc:
             with open(fc.path, 'rb') as fp:
@@ -139,19 +140,19 @@ class TestSliding(TestBase):
                 c = mman.make_cursor(fc.path, sliding=True)
                 assert c[0] == fdata[0]
                 assert mman.num_open_regions == 1
-                assert mman.num_used_regions == 0
+                assert mman.num_used_regions == 0           # No resources kept alive.
                 region = mman.regions_for_finfo(c.finfo)[0]
-                assert region.size == winsize
-                assert region.size == winsize
+                assert region.ofs == 0
+                assert region.size == ALLOCATIONGRANULARITY
 
-                ## Make a dissjoined region.
-                ofs = 2 * winsize   # == 10
+                ## Make a disjoint region.
+                ofs = 2 * ALLOCATIONGRANULARITY + 5
                 assert c[ofs] == fdata[ofs]
-                assert mman.num_open_regions == 2
+                assert mman.num_open_regions == 2           # Bound +1 region.
                 assert mman.num_used_regions == 0
                 region = mman.regions_for_finfo(c.finfo)[1]
-                ## OK, region grows from 0 (aligned) to include offset (10).
-                assert region.size == ofs + 1
+                assert region.size == ALLOCATIONGRANULARITY
+                assert region.ofs == 2 * ALLOCATIONGRANULARITY
 
     def test_performance(self):
         # PERFORMANCE

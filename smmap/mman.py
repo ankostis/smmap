@@ -105,9 +105,10 @@ class _MapWindow(object):
         nofs = align_to_mmap(self.ofs, 0)
         self.size += self.ofs - nofs                # keep end-point constant
         self.ofs = nofs
-        ## Do NOT align end-point, to respect `window-size`,
-        #  and to save some time loading from disk.
-        #self.size = align_to_mmap(self.size, 1)
+        ## Align end-point, to respect `window-size`.
+        #  VERY ROUGHLY, the time itakes to load from disk
+        #  some bytes or a full page is the same.
+        self.size = align_to_mmap(self.size, 1)
 
     def extend_left_to(self, window, max_size):
         """Adjust the offset to start where the given window on our left ends if possible,
@@ -244,7 +245,7 @@ class MemmapManager(object):
                 coeff = 1024
             # END handle arch
             window_size = coeff * _MB_in_bytes
-        self.window_size = window_size
+        self.window_size = align_to_mmap(window_size, 1)
 
         if max_memory_size == 0:
             coeff = 1024
@@ -821,7 +822,11 @@ class TilingMemmapManager(MemmapManager):
 
             # it can happen that we align beyond the end of the file
             if mid.ofs_end > right.ofs:
-                mid.size = right.ofs - mid.ofs
+                ## The next line clamps size to smaller than page-size,
+                #  even if in the middle of the file!
+                #  TODO: Revisit tiling-allocation!
+                # mid.size = right.ofs - mid.ofs
+                pass
             # END readjust size
 
             ## We honor max memory size, and assure we have enough memory available.

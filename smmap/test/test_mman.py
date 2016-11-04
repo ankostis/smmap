@@ -76,6 +76,7 @@ class TestMMan(TestBase):
 
         wc.align()
         assert wc.ofs == 0
+        assert wc.size == align_to_mmap(wc.size, True)
 
     def test_FileInfo(self):
         with FileCreator(100, "sample_file") as fc:
@@ -219,8 +220,8 @@ class TestMMan(TestBase):
                                 assert c.ofs == base_offset
                                 assert rr.ofs == 0        # it was aligned and expanded
                                 if man.window_size:
-                                    # but isn't larger than the max window
-                                    assert rr.size == man.window_size
+                                    # but isn't larger than the max window (aligned)
+                                    assert rr.size == align_to_mmap(man.window_size, True)
                                 else:
                                     assert rr.size == fc.size
                                 # END ignore static managers which dont use windows and are aligned to file boundaries
