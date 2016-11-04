@@ -7,25 +7,25 @@ Changelog
 
 BREAKING CHANGES, actually a new project!
 
-- Class hierarchy is comprised of two kinds of "objects": 
-  - the **memap-managers** (class:`smmap.mman.MemmapManager`), which are  
+- Class hierarchy is comprised of two kinds of "objects":
+  - the **memap-managers** (class:`smmap.mman.MemmapManager`), which are
     both creating and managing the *window-handles* (see below).  These are:
     - the :class:`smmap.mman.GreadyMemmapManager` (the old ``StaticWindowMapManager``)
       which produces cursors that always map the whole file, and
     - the :class:`smmap.mman.TilingMemmapManager` (the old ``SlidingWindowMapManager``)
       which allocates possibly multiple, configurably small regions for each file.
-    
-  - the immutable **window-handles** (class:`smmap.mwindow.WindowHandle`) 
+
+  - the immutable **window-handles** (class:`smmap.mwindow.WindowHandle`)
     further divided into:
-    -  the **regions** (class:`smmap.mwindow.MemmapRegion`), that represent actual 
+    -  the **regions** (class:`smmap.mwindow.MemmapRegion`), that represent actual
        os-level :class:`mmap.mmap`, and ...
-    -  the **cursors**, the client-facing handles into memory mapped files, 
+    -  the **cursors**, the client-facing handles into memory mapped files,
        which are further subdivided into:
        - the :class:`smmap.mwindow.FixedWindowCursor`, (the old cursor), and
        - the :class:`smmap.mwindow.SlidingWindowCursor`, (the old ``SlidingWindowMapBuffer``).
 
 - All state is handled by *memmap-managers* using :class:`smmap.util.Relation` indexes;
-  the *window-handles* are immutable.
+  the *window-handles* are immutable, and their indexes are now absolute, even for cursors.
 - All objects have been retrofitted as context-managers, to release resources deterministically.
 - Use :class:`weakref.finalize` instead of ``__del__()`` to release leaked resources.
 

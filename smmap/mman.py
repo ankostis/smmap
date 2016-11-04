@@ -101,7 +101,7 @@ class _MapWindow(object):
         return self.ofs + self.size
 
     def align(self):
-        """Assures the previous window area is contained in the new one"""
+        """Extends offset downwards and size upwards so that region respects OS page-alignments."""
         nofs = align_to_mmap(self.ofs, 0)
         self.size += self.ofs - nofs                # keep end-point constant
         self.ofs = nofs
@@ -220,7 +220,8 @@ class MemmapManager(object):
         """initialize the manager with the given parameters.
         :param window_size: if -1, a default window size will be chosen depending on
             the operating system's architecture. It will internally be quantified to a multiple of the page size
-            If 0, the window may have any size, which basically results in mapping the whole file at one
+            If 0, the window may have any size, which basically results for *greedy-memman*,
+            mapping the whole file at one, and for *tiling-memmap*, ... TODO
         :param max_memory_size: maximum amount of memory we may map at once before releasing mapped regions.
             If 0, a viable default will be set depending on the system's architecture.
             It is a soft limit that is tried to be kept, but nothing bad happens if we have to over-allocate

@@ -233,7 +233,7 @@ class FixedWindowCursor(WindowHandle):
 
 
 class SlidingWindowCursor(WindowHandle):
-
+    # TODO: respect cursor interface and provide `buffer()` method.
     """
     A read-only buffer like object which allows direct byte-wise object and slicing into
     memory of a mapped file. The mapping is controlled by the slicing
